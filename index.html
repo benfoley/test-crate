@@ -6,166 +6,62 @@
 <title>resources2crate</title>
 <style>
   :root {
-    --bg: #0f1419;
-    --panel: #1a2029;
-    --panel-2: #222a35;
-    --border: #2d3742;
-    --text: #e6edf3;
-    --muted: #8b98a5;
-    --accent: #4f9cf9;
-    --accent-hover: #6aabfa;
-    --ok: #3fb950;
-    --warn: #d29922;
-    --err: #f85149;
+    --bg: #0f1419; --panel: #1a2029; --panel-2: #222a35; --border: #2d3742;
+    --text: #e6edf3; --muted: #8b98a5; --accent: #4f9cf9; --accent-hover: #6aabfa;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    display: flex;
-    flex-direction: column;
-  }
-  header {
-    padding: 20px 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-  }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+  header { padding: 20px 28px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 12px; }
   header h1 { font-size: 20px; margin: 0; font-weight: 600; }
   header .tag { color: var(--muted); font-size: 13px; }
-  main {
-    flex: 1;
-    display: grid;
-    grid-template-columns: minmax(320px, 420px) 1fr;
-    gap: 0;
-    min-height: 0;
-  }
-  .config {
-    padding: 24px 28px;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-  }
-  .output {
-    padding: 24px 28px;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  h2 {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-    margin: 0 0 14px;
-    font-weight: 600;
-  }
-  .field { margin-bottom: 18px; }
-  .field label {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    margin-bottom: 6px;
-  }
+  .context-bar { display: flex; align-items: center; gap: 14px; padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 13px; }
+  .context-bar .folder { font-family: var(--mono); } .context-bar .folder .k { color: var(--muted); } .context-bar .spacer { flex: 1; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .center-step { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; gap: 22px; }
+  .center-step .lead { font-size: 22px; font-weight: 600; } .center-step .sub { color: var(--muted); max-width: 480px; }
+  .step-num { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+  .mode-cards { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .mode-card { width: 250px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 22px; cursor: pointer; text-align: left; transition: border-color .12s, transform .12s; }
+  .mode-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .mode-card .ic { font-size: 26px; margin-bottom: 12px; } .mode-card .t { font-size: 17px; font-weight: 600; margin-bottom: 6px; } .mode-card .d { color: var(--muted); font-size: 13px; }
+  .build-grid { flex: 1; display: grid; grid-template-columns: minmax(340px, 440px) 1fr; min-height: 0; }
+  .config { padding: 24px 28px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .output { padding: 24px 28px; display: flex; flex-direction: column; min-height: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 14px; font-weight: 600; }
+  .field { margin-bottom: 14px; }
   .field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
-  input[type="text"], input[type="number"], select {
-    width: 100%;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 8px;
-    padding: 9px 11px;
-    font-size: 14px;
-    font-family: inherit;
-  }
-  input[type="text"]:focus, input[type="number"]:focus, select:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
-  .checkbox {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
-  .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
-  .checkbox label { margin: 0; }
-  .folder-box {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 18px;
-  }
-  .folder-box .name { font-family: var(--mono); font-size: 13px; word-break: break-all; }
-  .folder-box .name.empty { color: var(--muted); }
-  button {
-    background: var(--accent);
-    color: #041018;
-    border: none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-  }
+  .checkbox { display: flex; align-items: flex-start; gap: 9px; }
+  .checkbox input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); }
+  .checkbox label { margin: 0; font-size: 13px; font-weight: 500; }
+  button { background: var(--accent); color: #041018; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
   button:hover { background: var(--accent-hover); }
-  button.secondary {
-    background: var(--panel-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-  button.secondary:hover { background: var(--border); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .run-row { margin-top: 8px; }
-  .run-row button { width: 100%; padding: 12px; font-size: 15px; }
-  .log {
-    flex: 1;
-    background: #0b0f14;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    overflow-y: auto;
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    min-height: 0;
-  }
-  .log .l-info { color: var(--text); }
-  .log .l-muted { color: var(--muted); }
-  .log .l-ok { color: var(--ok); }
-  .log .l-warn { color: var(--warn); }
-  .log .l-err { color: var(--err); }
-  .summary {
-    display: flex;
-    gap: 20px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-  }
-  .stat {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 16px;
-    min-width: 90px;
-  }
-  .stat .num { font-size: 22px; font-weight: 600; }
-  .stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-  .unsupported {
-    margin: 28px;
-    padding: 20px 24px;
-    background: rgba(248, 81, 73, 0.08);
-    border: 1px solid var(--err);
-    border-radius: 10px;
-  }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); } button.secondary:hover { background: var(--border); }
+  button.big { padding: 13px 26px; font-size: 15px; } button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .run-row { margin-top: 8px; } .run-row button { width: 100%; padding: 12px; font-size: 15px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .log { flex: 1; background: #0b0f14; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-y: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; min-height: 0; }
+  .l-info { color: var(--text); } .l-muted { color: var(--muted); } .l-ok { color: var(--ok); } .l-warn { color: var(--warn); } .l-err { color: var(--err); }
+  .summary { display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; min-width: 90px; }
+  .stat .num { font-size: 22px; font-weight: 600; } .stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .show-view { flex: 1; display: flex; flex-direction: column; padding: 24px 28px; min-height: 0; }
+  .show-view .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .show-view .bar .fname { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  .show-pane { flex: 1; background: #0b0f14; border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; white-space: pre; min-height: 0; margin: 0; }
+  .show-frame { flex: 1; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; min-height: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg-btn { background: var(--panel); color: var(--muted); border: none; border-radius: 0; padding: 5px 14px; font-size: 13px; font-weight: 600; }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+  .seg-btn:hover:not(:disabled) { background: var(--panel-2); color: var(--text); }
+  .seg-btn.active { background: var(--accent); color: #041018; }
+  .seg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; max-width: 440px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); }
+  .modal h3 { margin: 0 0 10px; font-size: 17px; } .modal p { margin: 0 0 20px; color: var(--muted); } .modal .actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .unsupported { margin: 28px; padding: 20px 24px; background: rgba(248, 81, 73, 0.08); border: 1px solid var(--err); border-radius: 10px; }
   .unsupported h2 { color: var(--err); }
   code { font-family: var(--mono); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
   .hidden { display: none !important; }
@@ -174,346 +70,97 @@
 <body>
 <header>
   <h1>resources2crate</h1>
-  <span class="tag">pick a folder &middot; configure &middot; process in place</span>
+  <span class="tag">pick a folder &middot; build or show its RO-Crate (JSON &middot; xlsx &middot; html)</span>
 </header>
 
-<!-- Shown when the browser lacks the File System Access API -->
 <div id="unsupported" class="unsupported hidden">
   <h2>This browser can't run the app</h2>
   <p>This tool uses the <strong>File System Access API</strong>, which needs a Chromium browser
   (Chrome or Edge) running over <code>https://</code> or <code>http://localhost</code>.</p>
-  <p>Opening the file directly with <code>file://</code> won't work. See the README for how to
-  serve it locally.</p>
 </div>
 
-<main id="app">
-  <!-- ============ CONFIG PANEL ============ -->
-  <section class="config">
-    <h2>1. Folder</h2>
-    <div class="folder-box">
-      <span id="folderName" class="name empty">No folder selected</span>
-      <button id="pickBtn" class="secondary">Choose&hellip;</button>
+<div id="app" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0;">
+  <div id="contextBar" class="context-bar hidden">
+    <span class="folder"><span class="k">Folder:</span> <span id="ctxFolder"></span></span>
+    <button id="changeFolderBtn" class="secondary" style="padding:5px 10px;">Change</button>
+    <div class="spacer"></div>
+    <button id="menuBtn" class="secondary hidden" style="padding:5px 10px;">&larr; Menu</button>
+  </div>
+
+  <main>
+    <section id="view-folder" class="center-step">
+      <div class="step-num">Step 1</div>
+      <div class="lead">Select a folder</div>
+      <div class="sub">Choose a local corpus folder. Files are read and written directly on your
+        machine &mdash; nothing is uploaded.</div>
+      <button id="pickBtn" class="big">Choose folder&hellip;</button>
+    </section>
+
+    <section id="view-mode" class="center-step hidden">
+      <div class="step-num">Step 2</div>
+      <div class="lead">What would you like to do?</div>
+      <div class="mode-cards">
+        <div id="cardBuild" class="mode-card" role="button" tabindex="0">
+          <div class="ic">&#128296;</div>
+          <div class="t">Build</div>
+          <div class="d">Scan the folder and generate the RO-Crate: <code>ro-crate-metadata.json</code>, <code>.xlsx</code>, and <code>ro-crate-preview.html</code>.</div>
+        </div>
+        <div id="cardShow" class="mode-card" role="button" tabindex="0">
+          <div class="ic">&#128196;</div>
+          <div class="t">Show</div>
+          <div class="d">Render the existing <code>ro-crate-preview.html</code> in this folder.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-build" class="build-grid hidden">
+      <div class="config">
+        <h2>Options</h2>
+        <div id="optionsForm"></div>
+        <h2>Run</h2>
+        <div class="run-row"><button id="runBtn">Build RO-Crate</button></div>
+        <div class="note">Root-dataset metadata and sample data come from built-in defaults, or from
+          <code>config.json</code> / <code>sample-data.json</code> if present in the folder.</div>
+      </div>
+      <div class="output">
+        <h2>Results</h2>
+        <div class="summary">
+          <div class="stat"><div id="statFiles" class="num">&mdash;</div><div class="lbl">Files seen</div></div>
+          <div class="stat"><div id="statEntities" class="num">&mdash;</div><div class="lbl">Entities</div></div>
+          <div class="stat"><div id="statTime" class="num">&mdash;</div><div class="lbl">Time</div></div>
+        </div>
+        <div id="log" class="log"><span class="l-muted">Set your options, then click Build RO-Crate.</span></div>
+      </div>
+    </section>
+
+    <section id="view-show" class="show-view hidden">
+      <div class="bar">
+        <h2 style="margin:0;">RO-Crate</h2>
+        <div class="seg">
+          <button id="showTabPreview" class="seg-btn active">Preview</button>
+          <button id="showTabJson" class="seg-btn">JSON</button>
+        </div>
+        <span id="showFileName" class="fname"></span>
+        <div style="flex:1;"></div>
+        <button id="rebuildBtn" class="secondary" style="padding:6px 12px;">Rebuild</button>
+      </div>
+      <iframe id="showFrame" class="show-frame" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" title="RO-Crate preview"></iframe>
+      <pre id="showPane" class="show-pane hidden"></pre>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>No RO-Crate found</h3>
+    <p>There's no <code>ro-crate-preview.html</code> in this folder yet. Would you like to build one?</p>
+    <div class="actions">
+      <button id="modalCancel" class="secondary">Cancel</button>
+      <button id="modalBuild">Build one</button>
     </div>
+  </div>
+</div>
 
-    <h2>2. Options</h2>
-    <div id="optionsForm"><!-- built from OPTION_SCHEMA at runtime --></div>
-
-    <h2>3. Run</h2>
-    <div class="run-row">
-      <button id="runBtn" disabled>Run</button>
-    </div>
-  </section>
-
-  <!-- ============ OUTPUT PANEL ============ -->
-  <section class="output">
-    <h2>Results</h2>
-    <div class="summary">
-      <div class="stat"><div id="statFiles" class="num">&mdash;</div><div class="lbl">Files seen</div></div>
-      <div class="stat"><div id="statWritten" class="num">&mdash;</div><div class="lbl">Files written</div></div>
-      <div class="stat"><div id="statTime" class="num">&mdash;</div><div class="lbl">Time</div></div>
-    </div>
-    <div id="log" class="log"><span class="l-muted">Ready. Choose a folder to begin.</span></div>
-  </section>
-</main>
-
-<script>
-"use strict";
-
-/* ============================================================================
- * OPTION SCHEMA
- * ----------------------------------------------------------------------------
- * This drives the config form. Add/remove entries here and the UI + the options
- * object passed to processFolder() update automatically.
- *
- *   type:    "text" | "number" | "checkbox" | "select"
- *   key:     property name on the `options` object
- *   label:   shown in the UI
- *   default: initial value
- *   hint:    optional helper text
- *   choices: for "select" only — array of { value, label }
- * ==========================================================================*/
-const OPTION_SCHEMA = [
-  { type: "text",     key: "crateName", label: "Crate name",
-    default: "My Crate", hint: "Written into the output manifest." },
-  { type: "text",     key: "outputFile", label: "Output filename",
-    default: "manifest.json", hint: "Created/overwritten in the chosen folder." },
-  { type: "number",   key: "maxDepth",  label: "Max folder depth",
-    default: 5, hint: "How many levels deep to scan. 0 = top level only." },
-  { type: "select",   key: "format",    label: "Output format",
-    default: "json",
-    choices: [
-      { value: "json",  label: "JSON (pretty)" },
-      { value: "jsonl", label: "JSON Lines (one file per line)" }
-    ]
-  },
-  { type: "checkbox", key: "includeHidden", label: "Include hidden files (dot-files)",
-    default: false },
-  { type: "checkbox", key: "overwrite", label: "Overwrite output if it exists",
-    default: true },
-];
-
-/* ============================================================================
- * DOM refs + tiny helpers
- * ==========================================================================*/
-const $ = (id) => document.getElementById(id);
-const logEl = $("log");
-
-function log(msg, cls = "info") {
-  const span = document.createElement("span");
-  span.className = "l-" + cls;
-  span.textContent = msg + "\n";
-  logEl.appendChild(span);
-  logEl.scrollTop = logEl.scrollHeight;
-}
-function clearLog() { logEl.textContent = ""; }
-
-/* ============================================================================
- * Build the options form from the schema
- * ==========================================================================*/
-function buildForm() {
-  const form = $("optionsForm");
-  form.innerHTML = "";
-  for (const opt of OPTION_SCHEMA) {
-    const wrap = document.createElement("div");
-    wrap.className = "field";
-
-    if (opt.type === "checkbox") {
-      wrap.classList.add("checkbox");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.id = "opt_" + opt.key;
-      input.checked = !!opt.default;
-      const label = document.createElement("label");
-      label.htmlFor = input.id;
-      label.textContent = opt.label;
-      wrap.append(input, label);
-    } else {
-      const label = document.createElement("label");
-      label.htmlFor = "opt_" + opt.key;
-      label.textContent = opt.label;
-      wrap.appendChild(label);
-
-      let input;
-      if (opt.type === "select") {
-        input = document.createElement("select");
-        for (const c of opt.choices) {
-          const o = document.createElement("option");
-          o.value = c.value;
-          o.textContent = c.label;
-          input.appendChild(o);
-        }
-        input.value = opt.default;
-      } else {
-        input = document.createElement("input");
-        input.type = opt.type === "number" ? "number" : "text";
-        input.value = opt.default;
-      }
-      input.id = "opt_" + opt.key;
-      wrap.appendChild(input);
-
-      if (opt.hint) {
-        const hint = document.createElement("div");
-        hint.className = "hint";
-        hint.textContent = opt.hint;
-        wrap.appendChild(hint);
-      }
-    }
-    form.appendChild(wrap);
-  }
-}
-
-/* Read the current form values into a plain options object. */
-function readOptions() {
-  const options = {};
-  for (const opt of OPTION_SCHEMA) {
-    const el = $("opt_" + opt.key);
-    if (opt.type === "checkbox") options[opt.key] = el.checked;
-    else if (opt.type === "number") options[opt.key] = Number(el.value);
-    else options[opt.key] = el.value;
-  }
-  return options;
-}
-
-/* ============================================================================
- * File System Access plumbing
- * ==========================================================================*/
-let dirHandle = null;
-
-async function verifyPermission(handle, readWrite) {
-  const opts = { mode: readWrite ? "readwrite" : "read" };
-  if ((await handle.queryPermission(opts)) === "granted") return true;
-  if ((await handle.requestPermission(opts)) === "granted") return true;
-  return false;
-}
-
-async function pickFolder() {
-  try {
-    dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-  } catch (e) {
-    if (e && e.name === "AbortError") return; // user cancelled
-    log("Could not open folder: " + e.message, "err");
-    return;
-  }
-  $("folderName").textContent = dirHandle.name;
-  $("folderName").classList.remove("empty");
-  $("runBtn").disabled = false;
-  clearLog();
-  log("Folder selected: " + dirHandle.name, "ok");
-  log("Set your options, then click Run.", "muted");
-}
-
-/* Recursively walk a directory handle, collecting file entries. */
-async function walkDirectory(handle, options, depth = 0, prefix = "") {
-  const files = [];
-  for await (const entry of handle.values()) {
-    const isHidden = entry.name.startsWith(".");
-    if (isHidden && !options.includeHidden) continue;
-    const path = prefix ? prefix + "/" + entry.name : entry.name;
-
-    if (entry.kind === "file") {
-      const file = await entry.getFile();
-      files.push({
-        path,
-        name: entry.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        type: file.type || "",
-      });
-    } else if (entry.kind === "directory" && depth < options.maxDepth) {
-      const nested = await walkDirectory(entry, options, depth + 1, path);
-      files.push(...nested);
-    }
-  }
-  return files;
-}
-
-/* Write text to a file inside the chosen directory. */
-async function writeFile(handle, filename, contents) {
-  const fileHandle = await handle.getFileHandle(filename, { create: true });
-  const writable = await fileHandle.createWritable();
-  await writable.write(contents);
-  await writable.close();
-}
-
-/* Check whether a filename already exists at the top level. */
-async function fileExists(handle, filename) {
-  try {
-    await handle.getFileHandle(filename, { create: false });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* ============================================================================
- *                        >>> YOUR LOGIC GOES HERE <<<
- * ----------------------------------------------------------------------------
- * This is the one function you replace. It receives:
- *   dirHandle - the chosen directory (read + write)
- *   files     - array of { path, name, size, lastModified, type } from the walk
- *   options   - the config object from the form (keys match OPTION_SCHEMA)
- *   ctx       - { log, writeFile, fileExists } helpers
- *
- * Return an object; whatever `written` count you report shows in the UI.
- *
- * The placeholder below just builds a manifest of the files it found and
- * writes it back into the folder — enough to prove the read + write round-trip.
- * ==========================================================================*/
-async function processFolder(dirHandle, files, options, ctx) {
-  ctx.log(`Scanned ${files.length} file(s).`, "info");
-
-  // --- placeholder "processing": build a manifest -------------------------
-  const manifest = {
-    name: options.crateName,
-    generatedBy: "resources2crate (scaffold)",
-    root: dirHandle.name,
-    fileCount: files.length,
-    files: files.map((f) => ({
-      path: f.path,
-      bytes: f.size,
-      lastModified: new Date(f.lastModified).toISOString(),
-      type: f.type,
-    })),
-  };
-
-  let contents;
-  if (options.format === "jsonl") {
-    contents = files
-      .map((f) => JSON.stringify({ path: f.path, bytes: f.size }))
-      .join("\n");
-  } else {
-    contents = JSON.stringify(manifest, null, 2);
-  }
-
-  // --- write it back into the folder --------------------------------------
-  if (!options.overwrite && (await ctx.fileExists(dirHandle, options.outputFile))) {
-    ctx.log(`"${options.outputFile}" already exists and overwrite is off — skipping write.`, "warn");
-    return { written: 0 };
-  }
-
-  await ctx.writeFile(dirHandle, options.outputFile, contents);
-  ctx.log(`Wrote ${options.outputFile} (${contents.length} bytes).`, "ok");
-
-  return { written: 1 };
-}
-/* ======================= end of replaceable section ======================= */
-
-/* ============================================================================
- * Run orchestration
- * ==========================================================================*/
-async function run() {
-  if (!dirHandle) return;
-  const runBtn = $("runBtn");
-  runBtn.disabled = true;
-  runBtn.textContent = "Running…";
-
-  const started = performance.now();
-  $("statFiles").textContent = "—";
-  $("statWritten").textContent = "—";
-  $("statTime").textContent = "—";
-
-  try {
-    if (!(await verifyPermission(dirHandle, true))) {
-      log("Permission to read/write the folder was denied.", "err");
-      return;
-    }
-
-    const options = readOptions();
-    log("Options: " + JSON.stringify(options), "muted");
-
-    const files = await walkDirectory(dirHandle, options);
-    $("statFiles").textContent = files.length;
-
-    const ctx = { log, writeFile, fileExists };
-    const result = await processFolder(dirHandle, files, options, ctx);
-
-    $("statWritten").textContent = (result && result.written) || 0;
-    const secs = ((performance.now() - started) / 1000).toFixed(2);
-    $("statTime").textContent = secs + "s";
-    log("Done in " + secs + "s.", "ok");
-  } catch (e) {
-    log("Error: " + (e && e.message ? e.message : e), "err");
-    console.error(e);
-  } finally {
-    runBtn.disabled = false;
-    runBtn.textContent = "Run";
-  }
-}
-
-/* ============================================================================
- * Boot
- * ==========================================================================*/
-function boot() {
-  if (!("showDirectoryPicker" in window)) {
-    $("unsupported").classList.remove("hidden");
-    $("app").classList.add("hidden");
-    return;
-  }
-  buildForm();
-  $("pickBtn").addEventListener("click", pickFolder);
-  $("runBtn").addEventListener("click", run);
-}
-boot();
-</script>
+<script type="module" src="/src/main.js"></script>
 </body>
 </html>

@@ -1,0 +1,22 @@
+{
+  "name": "resources2crate",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser RO-Crate builder for a local folder — build + preview (JSON, xlsx, html) via the ro-crate libraries.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5000"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "ro-crate": "^3.7.2",
+    "ro-crate-excel": "^1.2.1",
+    "ro-crate-html-lite": "^0.0.8"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "vite-plugin-node-polyfills": "^0.22.0"
+  }
+}

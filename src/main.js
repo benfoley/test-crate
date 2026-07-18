@@ -1,0 +1,291 @@
+// resources2crate — browser UI + File System Access wiring.
+// The crate assembly and output generation live in ./crate.js (library-based,
+// isomorphic). This file only handles picking a folder, reading/writing files,
+// and the stepped Build/Show UI.
+
+import {
+  buildFileMetadata, buildCrate, crateToJsonString, crateToXlsxBytes, crateToPreviewHtml,
+  GENERATED_FILENAMES, CONTROL_FILENAMES,
+} from "./crate.js";
+import { identifyAllLanguages } from "./austlang.js";
+import { DEFAULT_CONFIG, DEFAULT_SAMPLE_DATA } from "./defaults.js";
+
+const JSON_FILE = "ro-crate-metadata.json";
+const XLSX_FILE = "ro-crate-metadata.xlsx";
+const HTML_FILE = "ro-crate-preview.html";
+
+const OPTION_SCHEMA = [
+  { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
+  { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true },
+  { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
+    hint: "Calls the LDaCA AUSTLANG service. May be blocked by CORS in a browser — degrades gracefully." },
+  { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
+    hint: "Only applies with the option above. More matches, more false positives." },
+  { key: "overwrite", label: "Overwrite existing outputs", default: true },
+];
+
+/* ---------- DOM helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const logEl = () => $("log");
+function log(msg, cls = "info") {
+  const span = document.createElement("span");
+  span.className = "l-" + cls;
+  span.textContent = msg + "\n";
+  logEl().appendChild(span);
+  logEl().scrollTop = logEl().scrollHeight;
+}
+function clearLog() { logEl().textContent = ""; }
+
+/* ---------- view routing ---------- */
+const VIEWS = ["view-folder", "view-mode", "view-build", "view-show"];
+function showView(name) {
+  for (const v of VIEWS) $(v).classList.toggle("hidden", v !== name);
+  $("contextBar").classList.toggle("hidden", !dirHandle);
+  $("menuBtn").classList.toggle("hidden", !(name === "view-build" || name === "view-show"));
+}
+
+/* ---------- options form ---------- */
+function buildForm() {
+  const form = $("optionsForm");
+  form.innerHTML = "";
+  for (const opt of OPTION_SCHEMA) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const row = document.createElement("div");
+    row.className = "checkbox";
+    const input = document.createElement("input");
+    input.type = "checkbox"; input.id = "opt_" + opt.key; input.checked = !!opt.default;
+    const label = document.createElement("label");
+    label.htmlFor = input.id; label.textContent = opt.label;
+    row.append(input, label);
+    wrap.appendChild(row);
+    if (opt.hint) {
+      const hint = document.createElement("div");
+      hint.className = "hint"; hint.textContent = opt.hint;
+      wrap.appendChild(hint);
+    }
+    form.appendChild(wrap);
+  }
+}
+function readOptions() {
+  const o = {};
+  for (const opt of OPTION_SCHEMA) o[opt.key] = $("opt_" + opt.key).checked;
+  return o;
+}
+
+/* ---------- File System Access ---------- */
+let dirHandle = null;
+
+async function verifyPermission(handle, readWrite) {
+  const opts = { mode: readWrite ? "readwrite" : "read" };
+  if ((await handle.queryPermission(opts)) === "granted") return true;
+  if ((await handle.requestPermission(opts)) === "granted") return true;
+  return false;
+}
+async function walkDirectory(handle, prefix = "") {
+  const files = [];
+  for await (const entry of handle.values()) {
+    const nm = entry.name;
+    if (nm.startsWith(".") || nm.startsWith("~$")) continue;
+    if (GENERATED_FILENAMES.has(nm) || CONTROL_FILENAMES.has(nm)) continue;
+    const rel = prefix ? prefix + "/" + nm : nm;
+    if (entry.kind === "file") files.push({ fileName: nm, relativePath: rel });
+    else if (entry.kind === "directory") files.push(...await walkDirectory(entry, rel));
+  }
+  return files;
+}
+async function writeFile(handle, filename, contents) {
+  const fh = await handle.getFileHandle(filename, { create: true });
+  const w = await fh.createWritable();
+  await w.write(contents);
+  await w.close();
+}
+async function fileExists(handle, filename) {
+  try { await handle.getFileHandle(filename, { create: false }); return true; }
+  catch { return false; }
+}
+async function readFileText(handle, filename) {
+  try {
+    const fh = await handle.getFileHandle(filename, { create: false });
+    return await (await fh.getFile()).text();
+  } catch (e) {
+    if (e && e.name === "NotFoundError") return null;
+    throw e;
+  }
+}
+async function readJsonFromFolder(handle, filename) {
+  const text = await readFileText(handle, filename);
+  if (text === null) return null;
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error(`${filename} in the folder is not valid JSON: ${e.message}`); }
+}
+
+/* ---------- Build ---------- */
+async function processFolder(dirHandle, files, options) {
+  const config = (await readJsonFromFolder(dirHandle, "config.json")) || DEFAULT_CONFIG;
+  const sampleData = (await readJsonFromFolder(dirHandle, "sample-data.json")) || DEFAULT_SAMPLE_DATA;
+  log(
+    `Config: ${config === DEFAULT_CONFIG ? "built-in default" : "config.json from folder"} · ` +
+    `Sample data: ${sampleData === DEFAULT_SAMPLE_DATA ? "built-in default" : "sample-data.json from folder"}.`,
+    "muted"
+  );
+
+  files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  const filesWithMeta = buildFileMetadata(files);
+  log(`Scanned ${filesWithMeta.length} file(s).`, "info");
+
+  let langByIndex = null;
+  if (options.enableLanguageLookups) {
+    langByIndex = await identifyAllLanguages(filesWithMeta, options.includeAlternateNames, log);
+  }
+
+  const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log);
+  const entities = crate.getJson()["@graph"].length;
+
+  // ro-crate-metadata.json
+  if (options.overwrite || !(await fileExists(dirHandle, JSON_FILE))) {
+    await writeFile(dirHandle, JSON_FILE, crateToJsonString(crate));
+    log(`Wrote ${JSON_FILE}.`, "ok");
+  } else log(`${JSON_FILE} exists and overwrite is off — skipped.`, "warn");
+
+  // ro-crate-metadata.xlsx
+  if (options.makeXlsx) {
+    if (options.overwrite || !(await fileExists(dirHandle, XLSX_FILE))) {
+      const bytes = await crateToXlsxBytes(crate);
+      await writeFile(dirHandle, XLSX_FILE, bytes);
+      log(`Wrote ${XLSX_FILE}.`, "ok");
+    } else log(`${XLSX_FILE} exists and overwrite is off — skipped.`, "warn");
+  }
+
+  // ro-crate-preview.html
+  if (options.makeHtml) {
+    if (options.overwrite || !(await fileExists(dirHandle, HTML_FILE))) {
+      try {
+        const html = await crateToPreviewHtml(crate);
+        await writeFile(dirHandle, HTML_FILE, html);
+        log(`Wrote ${HTML_FILE}.`, "ok");
+      } catch (e) {
+        log(`HTML preview failed: ${e.message}`, "err");
+      }
+    } else log(`${HTML_FILE} exists and overwrite is off — skipped.`, "warn");
+  }
+
+  return { files: filesWithMeta.length, entities };
+}
+
+async function run() {
+  if (!dirHandle) return;
+  const runBtn = $("runBtn");
+  runBtn.disabled = true; runBtn.textContent = "Building…";
+  const started = performance.now();
+  $("statFiles").textContent = "—"; $("statEntities").textContent = "—"; $("statTime").textContent = "—";
+  try {
+    if (!(await verifyPermission(dirHandle, true))) { log("Permission to read/write the folder was denied.", "err"); return; }
+    const options = readOptions();
+    log("Options: " + JSON.stringify(options), "muted");
+    const files = await walkDirectory(dirHandle);
+    const result = await processFolder(dirHandle, files, options);
+    $("statFiles").textContent = result.files;
+    $("statEntities").textContent = result.entities;
+    const secs = ((performance.now() - started) / 1000).toFixed(2);
+    $("statTime").textContent = secs + "s";
+    log("Done in " + secs + "s.", "ok");
+  } catch (e) {
+    log("Error: " + (e && e.message ? e.message : e), "err");
+    console.error(e);
+  } finally {
+    runBtn.disabled = false; runBtn.textContent = "Build RO-Crate";
+  }
+}
+
+/* ---------- actions ---------- */
+async function pickFolder() {
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    console.error("Could not open folder:", e);
+    return;
+  }
+  $("ctxFolder").textContent = dirHandle.name;
+  showView("view-mode");
+}
+function openBuild() {
+  clearLog();
+  log("Set your options, then click Build RO-Crate.", "muted");
+  showView("view-build");
+}
+let showHtml = null, showJson = null;
+
+async function openShow() {
+  if (!dirHandle) return;
+  try {
+    if (!(await verifyPermission(dirHandle, false))) return;
+    showHtml = await readFileText(dirHandle, HTML_FILE);
+    showJson = await readFileText(dirHandle, JSON_FILE);
+    if (showHtml === null && showJson === null) { $("modal").classList.remove("hidden"); return; }
+    showView("view-show");
+    renderShow(showHtml !== null ? "preview" : "json");
+  } catch (e) {
+    const frame = $("showFrame"), pane = $("showPane");
+    $("showFileName").textContent = "";
+    frame.classList.add("hidden");
+    frame.removeAttribute("srcdoc");
+    pane.classList.remove("hidden");
+    pane.textContent = "Error reading the RO-Crate: " + (e && e.message ? e.message : e);
+    showView("view-show");
+  }
+}
+
+function renderShow(mode) {
+  const frame = $("showFrame"), pane = $("showPane");
+  const tabP = $("showTabPreview"), tabJ = $("showTabJson");
+  // Fall back to whichever file is present if the requested one is missing.
+  if (mode === "preview" && showHtml === null) mode = "json";
+  if (mode === "json" && showJson === null) mode = "preview";
+
+  tabP.disabled = showHtml === null;
+  tabJ.disabled = showJson === null;
+  tabP.classList.toggle("active", mode === "preview");
+  tabJ.classList.toggle("active", mode === "json");
+
+  if (mode === "preview") {
+    $("showFileName").textContent = HTML_FILE;
+    pane.classList.add("hidden");
+    pane.textContent = "";
+    frame.classList.remove("hidden");
+    frame.srcdoc = showHtml;
+  } else {
+    let pretty = showJson;
+    try { pretty = JSON.stringify(JSON.parse(showJson), null, 2); } catch { /* raw */ }
+    $("showFileName").textContent = JSON_FILE;
+    frame.classList.add("hidden");
+    frame.removeAttribute("srcdoc");
+    pane.classList.remove("hidden");
+    pane.textContent = pretty;
+  }
+}
+
+/* ---------- boot ---------- */
+function boot() {
+  if (!("showDirectoryPicker" in window)) { $("unsupported").classList.remove("hidden"); return; }
+  $("app").classList.remove("hidden");
+  buildForm();
+  showView("view-folder");
+
+  $("pickBtn").addEventListener("click", pickFolder);
+  $("changeFolderBtn").addEventListener("click", pickFolder);
+  $("menuBtn").addEventListener("click", () => showView("view-mode"));
+  $("cardBuild").addEventListener("click", openBuild);
+  $("cardShow").addEventListener("click", openShow);
+  $("showTabPreview").addEventListener("click", () => renderShow("preview"));
+  $("showTabJson").addEventListener("click", () => renderShow("json"));
+  const key = (fn) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } };
+  $("cardBuild").addEventListener("keydown", key(openBuild));
+  $("cardShow").addEventListener("keydown", key(openShow));
+  $("runBtn").addEventListener("click", run);
+  $("rebuildBtn").addEventListener("click", openBuild);
+  $("modalCancel").addEventListener("click", () => $("modal").classList.add("hidden"));
+  $("modalBuild").addEventListener("click", () => { $("modal").classList.add("hidden"); openBuild(); });
+}
+boot();

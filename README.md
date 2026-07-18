@@ -1,100 +1,112 @@
 # resources2crate
 
-A zero-install, single-file web app that lets a user **pick a local folder, configure
-some options, and run a command over that folder in place** — reading its files and
-writing results back — entirely in the browser. No Node, no installer, no code signing.
+A browser app that turns a local folder of resources into an
+[RO-Crate](https://www.researchobject.org/ro-crate/) — reading the folder and writing three
+outputs back into it:
 
-It's built on the **File System Access API**, so it works in Chromium browsers
-(Chrome / Edge) and needs a *secure context* (`https://` or `http://localhost`).
+- `ro-crate-metadata.json` — the crate as JSON-LD
+- `ro-crate-metadata.xlsx` — the crate as a spreadsheet (via `ro-crate-excel`)
+- `ro-crate-preview.html` — a self-contained HTML preview (via `ro-crate-html-lite`)
+
+It reads and writes local files through the **File System Access API** (Chrome / Edge), so
+the user's files never leave their machine. Unlike the earlier single-file version, this
+one **uses the `ro-crate` library** to assemble the crate — the same approach as
+[`crate-o`](https://github.com/Language-Research-Technology/crate-o) and
+[`corpus-tools-dyirbal`](https://github.com/Language-Research-Technology/corpus-tools-dyirbal) —
+rather than hand-building JSON-LD. Because those libraries are npm packages, the app is now
+a small **Vite** project that bundles them for the browser.
 
 ---
 
-## Running it
+## Install & run
 
-The one catch with the File System Access API: it will **not** run from a
-`file://` URL (opening `index.html` by double-clicking won't work). Serve it over
-`localhost` or host it over HTTPS.
-
-**Locally (quickest):**
+Requires Node and npm (for the build). The end result runs in Chrome/Edge.
 
 ```bash
 cd resources2crate
+npm install          # pulls ro-crate, ro-crate-excel, ro-crate-html-lite, exceljs, vite
 
-# Python (already on macOS):
-python3 -m http.server 8000
-
-# …or Node:
-npx serve .
+npm run dev          # dev server at http://localhost:5173  → open in Chrome/Edge
+# or
+npm run build        # produces dist/  (a static site)
+npm run preview      # serve the built dist/ at http://localhost:5000
 ```
 
-Then open <http://localhost:8000> in **Chrome or Edge**.
+The File System Access API needs a secure context (`http://localhost` or `https://`), so a
+`file://` open won't work. To deploy, `npm run build` and host the `dist/` folder on any
+static HTTPS host — the end-user experience is then zero-install.
 
-**For real use / handing to others:** upload `index.html` to any static HTTPS host
-(GitHub Pages, Netlify, Cloudflare Pages, S3+CloudFront, an internal server…). Because
-it's one static file with no backend, hosting is trivial and there's nothing to sign.
-The user's files never leave their machine — all reading and writing happens locally in
-the browser.
-
-> Browser support: Chrome/Edge (and Chromium derivatives). Safari and Firefox do **not**
-> support directory access, so they'll see the "can't run" notice.
+> **Re-verify the crate pipeline** any time with `node test-crate.mjs` (after `npm install`):
+> it builds a crate from a synthetic file list and confirms the JSON, xlsx, and html all
+> generate. This is exactly how the pipeline was validated against the real libraries.
 
 ---
 
-## Where your logic goes
+## The flow
 
-Everything is in `index.html`. You only need to touch two spots:
-
-1. **`OPTION_SCHEMA`** (top of the `<script>`) — declaratively defines the config form.
-   Add/remove entries and the UI plus the `options` object update automatically.
-   Supported field types: `text`, `number`, `checkbox`, `select`.
-
-2. **`processFolder(dirHandle, files, options, ctx)`** — the single function marked
-   `>>> YOUR LOGIC GOES HERE <<<`. Replace the placeholder body with your real command.
-   It receives:
-
-   | arg         | what it is                                                            |
-   |-------------|-----------------------------------------------------------------------|
-   | `dirHandle` | the chosen directory handle (read **and** write)                      |
-   | `files`     | array of `{ path, name, size, lastModified, type }` from the walk     |
-   | `options`   | the config object from the form (keys match `OPTION_SCHEMA`)          |
-   | `ctx`       | helpers: `log(msg, level)`, `writeFile(dir, name, text)`, `fileExists(dir, name)` |
-
-   Return an object; the `written` count you report is shown in the Results panel.
-
-The placeholder just scans the folder and writes a `manifest.json` back into it — enough
-to prove the read + write round-trip works end to end.
-
-### Handy building blocks already wired up
-
-- `walkDirectory(handle, options)` — recursive folder walk, respects `maxDepth` and
-  `includeHidden`.
-- `writeFile(handle, filename, contents)` — create/overwrite a file in the folder.
-- `fileExists(handle, filename)` — top-level existence check.
-- `verifyPermission(handle, readWrite)` — re-prompts for access if needed.
-- `log(msg, level)` — append to the log pane; levels: `info`, `muted`, `ok`, `warn`, `err`.
-
-To read a file's contents inside `processFolder`, get its handle and call `.getFile()`:
-
-```js
-const fh = await dirHandle.getFileHandle(someName);
-const text = await (await fh.getFile()).text();
-```
-
-For nested writes (into subfolders), get the subdirectory handle first with
-`dirHandle.getDirectoryHandle(name, { create: true })`.
+1. **Select folder** — pick a local corpus folder (read + write).
+2. **Build or Show:**
+   - **Build** — scan the folder and generate the three RO-Crate outputs.
+   - **Show** — display the existing `ro-crate-metadata.json` (offers to build one if missing).
 
 ---
 
-## Current options (placeholder)
+## How the crate is built
 
-| key            | type     | purpose                                             |
-|----------------|----------|-----------------------------------------------------|
-| `crateName`    | text     | name written into the manifest                      |
-| `outputFile`   | text     | filename created/overwritten in the folder          |
-| `maxDepth`     | number   | how many levels deep to scan (0 = top level only)   |
-| `format`       | select   | `json` (pretty) or `jsonl` (one line per file)      |
-| `includeHidden`| checkbox | include dot-files                                   |
-| `overwrite`    | checkbox | overwrite the output file if it already exists      |
+`src/crate.js` is a dependency-light, **isomorphic** module (runs in the browser *and* Node)
+that reproduces `corpus-tools-dyirbal`'s crate structure using the `ROCrate` class:
 
-Swap these for whatever your command actually needs.
-# test-crate
+- root dataset (`RepositoryCollection`) with `pcdm:hasMember` → one `RepositoryObject` per
+  top-level folder (standalone top-level files get a synthetic object);
+- one `RepositoryObject` per top-level folder, `hasPart` listing every file beneath it;
+- one `File` entity per file (`@id` = relative path, `isPartOf`, `custom:possibleDuplicate`);
+- the custom `rdf:Property` definitions, and sample people/places/localities;
+- hash `@id`s of `RepositoryObject`s rewritten to `arcp://…/<name>` on export;
+- optional AUSTLANG subject-language identification (filename-based; see options).
+
+The crate object is then serialized with `crate.getJson()` (JSON), fed to `ro-crate-excel`'s
+`Workbook` (xlsx), and to `ro-crate-html-lite`'s `renderSinglePage` (html).
+
+### Options (Build)
+
+| option | effect |
+|--------|--------|
+| Generate ro-crate-metadata.xlsx | write the spreadsheet output (on by default) |
+| Generate ro-crate-preview.html | write the HTML preview (on by default) |
+| Identify subject languages (AUSTLANG, by filename) | the original's `-l`; filename-based only. `fetch` to the LDaCA service — may be CORS-blocked in the browser, degrades gracefully |
+| …also match AUSTLANG alternate names | the original's `-a` |
+| Overwrite existing outputs | off = skip files that already exist |
+
+### Configuration
+
+Root-dataset metadata and sample data come from built-in defaults (`src/defaults.js`,
+the Dyirbal workshop config). Drop `config.json` and/or `sample-data.json` into the folder to
+override them per-folder (same shapes as `corpus-tools-dyirbal`). `config.dataDir` is ignored
+— the chosen folder is the data dir. Generated outputs and these two control files are skipped
+during the scan.
+
+---
+
+## Architecture / bundling notes
+
+- **`src/crate.js` is isomorphic.** It imports only browser-safe entry points and returns
+  bytes/strings; the caller does I/O. That's why it can be unit-tested in Node
+  (`test-crate.mjs`) yet also run in the browser.
+- **`ro-crate-excel` is imported via `ro-crate-excel/lib/workbook.js`**, *not* the package
+  index. The index pulls in Node-only modules (`shelljs`, `fs-extra`, `hasha`) for OCFL/bagging;
+  `lib/workbook.js` needs only `exceljs`, `ro-crate`, `lodash`, `uuid`. exceljs ships a browser
+  build (`dist/exceljs.min.js`) that Vite selects automatically; we write `.xlsx` via
+  `workbook.xlsx.writeBuffer()` (a Blob) instead of to disk.
+- **`ro-crate-html-lite` renders offline.** It uses nunjucks *precompiled* templates (no `fs`),
+  and would otherwise `fetch` its default layout from GitHub at runtime (fragile + CORS). We
+  bundle that layout (`src/default_layout.js`, vendored from the package) and pass it in, so no
+  network call is needed.
+- **`vite.config.js`** adds `vite-plugin-node-polyfills` (Buffer/process/global) as a safety
+  net for transitive deps, and `base: './'` so the built site works from any path.
+
+## Not included
+
+- PDF *content* language identification (the original uses `pdf-parse`) — only filename-based
+  AUSTLANG matching is ported.
+- OCFL building and the spreadsheet **merge** step (`merge.js`, `-m`/`-g`).
+- Formal `ro-crate` validation.
