@@ -7,7 +7,9 @@ import {
   buildFileMetadata, buildCrate, crateToJsonString, crateToXlsxBytes, crateToPreviewHtml,
   GENERATED_FILENAMES, CONTROL_FILENAMES,
 } from "./crate.js";
-import { identifyAllLanguages } from "./austlang.js";
+// ./austlang.js (and its bundled AUSTLANG data pack) is loaded lazily via
+// dynamic import() only when language lookups are enabled — see run() — so the
+// ~730 kB data pack stays out of the main bundle.
 import { DEFAULT_CONFIG, DEFAULT_SAMPLE_DATA } from "./defaults.js";
 
 const JSON_FILE = "ro-crate-metadata.json";
@@ -18,7 +20,7 @@ const OPTION_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
   { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
-    hint: "Calls the LDaCA AUSTLANG service. May be blocked by CORS in a browser — degrades gracefully." },
+    hint: "Matches filenames against a bundled copy of the AUSTLANG data pack — fully offline, no network." },
   { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
     hint: "Only applies with the option above. More matches, more false positives." },
   { key: "overwrite", label: "Overwrite existing outputs", default: true },
@@ -136,6 +138,7 @@ async function processFolder(dirHandle, files, options) {
 
   let langByIndex = null;
   if (options.enableLanguageLookups) {
+    const { identifyAllLanguages } = await import("./austlang.js");
     langByIndex = await identifyAllLanguages(filesWithMeta, options.includeAlternateNames, log);
   }
 
