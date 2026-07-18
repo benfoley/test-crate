@@ -176,10 +176,13 @@ async function processFolder(dirHandle, files, options) {
   return { files: filesWithMeta.length, entities };
 }
 
+let buildHtml = null;  // ro-crate-preview.html captured after the last successful build
+
 async function run() {
   if (!dirHandle) return;
   const runBtn = $("runBtn");
   runBtn.disabled = true; runBtn.textContent = "Building…";
+  $("showHtmlBtn").classList.add("hidden"); buildHtml = null;
   const started = performance.now();
   $("statFiles").textContent = "—"; $("statEntities").textContent = "—"; $("statTime").textContent = "—";
   try {
@@ -193,6 +196,10 @@ async function run() {
     const secs = ((performance.now() - started) / 1000).toFixed(2);
     $("statTime").textContent = secs + "s";
     log("Done in " + secs + "s.", "ok");
+    // Capture the generated preview so the build-view button can open it in a
+    // new tab synchronously (no await between the click and window.open).
+    buildHtml = await readFileText(dirHandle, HTML_FILE);
+    if (buildHtml !== null) $("showHtmlBtn").classList.remove("hidden");
   } catch (e) {
     log("Error: " + (e && e.message ? e.message : e), "err");
     console.error(e);
@@ -215,10 +222,11 @@ async function pickFolder() {
 }
 function openBuild() {
   clearLog();
+  $("showHtmlBtn").classList.add("hidden");
   log("Set your options, then click Build RO-Crate.", "muted");
   showView("view-build");
 }
-let showHtml = null, showJson = null;
+let showHtml = null, showJson = null, previewUrl = null;
 
 async function openShow() {
   if (!dirHandle) return;
@@ -230,10 +238,9 @@ async function openShow() {
     showView("view-show");
     renderShow(showHtml !== null ? "preview" : "json");
   } catch (e) {
-    const frame = $("showFrame"), pane = $("showPane");
     $("showFileName").textContent = "";
-    frame.classList.add("hidden");
-    frame.removeAttribute("srcdoc");
+    $("showPreview").classList.add("hidden");
+    const pane = $("showPane");
     pane.classList.remove("hidden");
     pane.textContent = "Error reading the RO-Crate: " + (e && e.message ? e.message : e);
     showView("view-show");
@@ -241,7 +248,7 @@ async function openShow() {
 }
 
 function renderShow(mode) {
-  const frame = $("showFrame"), pane = $("showPane");
+  const preview = $("showPreview"), pane = $("showPane");
   const tabP = $("showTabPreview"), tabJ = $("showTabJson");
   // Fall back to whichever file is present if the requested one is missing.
   if (mode === "preview" && showHtml === null) mode = "json";
@@ -256,18 +263,29 @@ function renderShow(mode) {
     $("showFileName").textContent = HTML_FILE;
     pane.classList.add("hidden");
     pane.textContent = "";
-    frame.classList.remove("hidden");
-    frame.srcdoc = showHtml;
+    preview.classList.remove("hidden");
   } else {
     let pretty = showJson;
     try { pretty = JSON.stringify(JSON.parse(showJson), null, 2); } catch { /* raw */ }
     $("showFileName").textContent = JSON_FILE;
-    frame.classList.add("hidden");
-    frame.removeAttribute("srcdoc");
+    preview.classList.add("hidden");
     pane.classList.remove("hidden");
     pane.textContent = pretty;
   }
 }
+
+// Open HTML as a real document in a new browser tab. The generated
+// ro-crate-preview.html relies on in-page (:target) links to toggle tables,
+// which don't work inside an embedded/srcdoc frame, so it needs its own URL.
+// Must be called synchronously from a click handler (no awaits before it) so
+// the browser doesn't treat window.open as an unsolicited popup.
+function openHtmlInNewTab(html) {
+  if (!html) return;
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+  window.open(previewUrl, "_blank");
+}
+function openPreviewWindow() { openHtmlInNewTab(showHtml); }
 
 /* ---------- boot ---------- */
 function boot() {
@@ -283,10 +301,12 @@ function boot() {
   $("cardShow").addEventListener("click", openShow);
   $("showTabPreview").addEventListener("click", () => renderShow("preview"));
   $("showTabJson").addEventListener("click", () => renderShow("json"));
+  $("openPreviewBtn").addEventListener("click", openPreviewWindow);
   const key = (fn) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } };
   $("cardBuild").addEventListener("keydown", key(openBuild));
   $("cardShow").addEventListener("keydown", key(openShow));
   $("runBtn").addEventListener("click", run);
+  $("showHtmlBtn").addEventListener("click", () => openHtmlInNewTab(buildHtml));
   $("rebuildBtn").addEventListener("click", openBuild);
   $("modalCancel").addEventListener("click", () => $("modal").classList.add("hidden"));
   $("modalBuild").addEventListener("click", () => { $("modal").classList.add("hidden"); openBuild(); });
