@@ -8,7 +8,10 @@
 // / strings rather than writing files. The caller (browser or Node) does I/O.
 
 import { ROCrate } from "ro-crate";
-import { renderSinglePage } from "ro-crate-html-lite";
+// lib/preview.js is the package's real module (index.js only re-exports
+// renderSinglePage). renderTemplate + roCrateToJSON drive the styled preview
+// (custom template + config + css) on the dyirbal-workshop branch.
+import { renderSinglePage, renderTemplate, roCrateToJSON } from "ro-crate-html-lite/lib/preview.js";
 import Workbook from "ro-crate-excel/lib/workbook.js";
 import { CUSTOM_PROPERTIES } from "./defaults.js";
 import { DEFAULT_LAYOUT } from "./default_layout.js";
@@ -186,11 +189,31 @@ export async function crateToXlsxBytes(crate) {
   return workbook.workbook.xlsx.writeBuffer();
 }
 
-// Returns the ro-crate-preview.html string. By default it passes a bundled
-// `layouts` object so ro-crate-html-lite does NOT fetch its default layout from
-// GitHub at runtime (that fetch is fragile and CORS-blocked in the browser).
-export async function crateToPreviewHtml(crate, layouts = { default: DEFAULT_LAYOUT }) {
-  let html = await renderSinglePage({ crate, layouts });
+// Returns the ro-crate-preview.html string.
+//
+// Two modes:
+//  - Plain (default): the precompiled single-page template via renderSinglePage.
+//    A bundled `layouts` object is passed so the library does NOT fetch its
+//    default layout from GitHub at runtime (fragile + CORS-blocked in browser).
+//  - Styled: pass opts.template (a template string, e.g. the tabular template),
+//    opts.config (a preview config object: propertyGroups, settings,
+//    navigationByType, termMapping, footer…), and opts.css (a stylesheet string).
+//    Rendered via roCrateToJSON + renderTemplate, exactly as the CLI does.
+export async function crateToPreviewHtml(crate, opts = {}) {
+  const { layouts = { default: DEFAULT_LAYOUT }, template = null, config = null, css = "" } = opts;
+  let html;
+  if (template) {
+    const cfg = config || {};
+    const layout = (Array.isArray(cfg.propertyGroups) && cfg.propertyGroups.length)
+      ? cfg.propertyGroups : DEFAULT_LAYOUT;
+    const data = await roCrateToJSON(crate, cfg, layout);
+    data.cratePath = "";
+    data.layout = layout;
+    data.hasLayout = true;
+    html = await renderTemplate({ data, template, config: { ...cfg, propertyGroups: layout }, css, layout });
+  } else {
+    html = await renderSinglePage({ crate, layouts });
+  }
   // ro-crate-html-lite urlencodes file links wholesale, turning "/" into "%2F"
   // and breaking relative navigation; only href values (not "#" anchors) are real links.
   html = html.replace(/href="([^"#][^"]*)"/g, (match, href) =>

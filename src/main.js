@@ -11,6 +11,11 @@ import {
 // dynamic import() only when language lookups are enabled — see run() — so the
 // ~730 kB data pack stays out of the main bundle.
 import { DEFAULT_CONFIG, DEFAULT_SAMPLE_DATA } from "./defaults.js";
+// Bundled defaults for the styled ("tabular") HTML preview. A folder may override
+// these with its own preview-config.json / preview-style.css (see processFolder).
+import PREVIEW_TEMPLATE from "./preview_template.html?raw";
+import PREVIEW_CONFIG from "./preview_config.json";
+import PREVIEW_STYLE from "./preview_style.css?raw";
 
 const JSON_FILE = "ro-crate-metadata.json";
 const XLSX_FILE = "ro-crate-metadata.xlsx";
@@ -19,6 +24,8 @@ const HTML_FILE = "ro-crate-preview.html";
 const OPTION_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
   { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true },
+  { key: "styledPreview", label: "…styled tabular preview (custom template + CSS)", default: true,
+    hint: "Uses the bundled tabular template, config, and style — or preview-config.json / preview-style.css from the folder if present. Off = the library's plain preview." },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
     hint: "Matches filenames against a bundled copy of the AUSTLANG data pack — fully offline, no network." },
   { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
@@ -164,7 +171,22 @@ async function processFolder(dirHandle, files, options) {
   if (options.makeHtml) {
     if (options.overwrite || !(await fileExists(dirHandle, HTML_FILE))) {
       try {
-        const html = await crateToPreviewHtml(crate);
+        let html;
+        if (options.styledPreview) {
+          // Folder overrides win over the bundled workshop defaults.
+          const cfg = (await readJsonFromFolder(dirHandle, "preview-config.json")) || PREVIEW_CONFIG;
+          const cssOverride = await readFileText(dirHandle, "preview-style.css");
+          const css = cssOverride !== null ? cssOverride : PREVIEW_STYLE;
+          log(
+            `Preview: styled tabular · config ${cfg === PREVIEW_CONFIG ? "bundled default" : "preview-config.json from folder"} · ` +
+            `style ${cssOverride !== null ? "preview-style.css from folder" : "bundled default"}.`,
+            "muted"
+          );
+          html = await crateToPreviewHtml(crate, { template: PREVIEW_TEMPLATE, config: cfg, css });
+        } else {
+          log("Preview: plain (library default template).", "muted");
+          html = await crateToPreviewHtml(crate);
+        }
         await writeFile(dirHandle, HTML_FILE, html);
         log(`Wrote ${HTML_FILE}.`, "ok");
       } catch (e) {
