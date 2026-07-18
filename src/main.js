@@ -23,9 +23,15 @@ const HTML_FILE = "ro-crate-preview.html";
 
 const OPTION_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
-  { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true },
-  { key: "styledPreview", label: "…styled tabular preview (custom template + CSS)", default: true,
-    hint: "Uses the bundled tabular template, config, and style — or preview-config.json / preview-style.css from the folder if present. Off = the library's plain preview." },
+  { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true, children: [
+    { key: "styledPreview", label: "Styled tabular preview (custom template + CSS)", default: true,
+      hint: "Off = the library's plain preview.", children: [
+      { key: "configFile", type: "file", label: "Config (JSON)", accept: ".json,application/json",
+        hint: "Optional. Overrides the bundled config and any preview-config.json in the folder." },
+      { key: "styleFile", type: "file", label: "Style (CSS)", accept: ".css,text/css",
+        hint: "Optional. Overrides the bundled style and any preview-style.css in the folder." },
+    ] },
+  ] },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
     hint: "Matches filenames against a bundled copy of the AUSTLANG data pack — fully offline, no network." },
   { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
@@ -54,10 +60,23 @@ function showView(name) {
 }
 
 /* ---------- options form ---------- */
+// Uploaded config/style files (from the dropzones), keyed by option key:
+// { configFile: { name, text }, styleFile: { name, text } }
+const uploads = {};
+
+function hintEl(text) { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; }
+
 function buildForm() {
   const form = $("optionsForm");
   form.innerHTML = "";
-  for (const opt of OPTION_SCHEMA) {
+  Object.keys(uploads).forEach((k) => delete uploads[k]);
+  renderOptions(OPTION_SCHEMA, form);
+}
+
+function renderOptions(schema, parent) {
+  for (const opt of schema) {
+    if (opt.type === "file") { parent.appendChild(buildFileField(opt)); continue; }
+
     const wrap = document.createElement("div");
     wrap.className = "field";
     const row = document.createElement("div");
@@ -68,17 +87,74 @@ function buildForm() {
     label.htmlFor = input.id; label.textContent = opt.label;
     row.append(input, label);
     wrap.appendChild(row);
-    if (opt.hint) {
-      const hint = document.createElement("div");
-      hint.className = "hint"; hint.textContent = opt.hint;
-      wrap.appendChild(hint);
+    if (opt.hint) wrap.appendChild(hintEl(opt.hint));
+
+    if (opt.children) {
+      const panel = document.createElement("div");
+      panel.className = "subpanel"; panel.id = "panel_" + opt.key;
+      renderOptions(opt.children, panel);
+      wrap.appendChild(panel);
+      const sync = () => panel.classList.toggle("hidden", !input.checked);
+      input.addEventListener("change", sync);
+      sync();
     }
-    form.appendChild(wrap);
+    parent.appendChild(wrap);
+  }
+}
+
+function buildFileField(opt) {
+  const wrap = document.createElement("div");
+  wrap.className = "field file-field";
+  wrap.appendChild(Object.assign(document.createElement("div"), { className: "file-label", textContent: opt.label }));
+
+  const drop = document.createElement("label");
+  drop.className = "dropzone"; drop.htmlFor = "file_" + opt.key;
+  const dz = Object.assign(document.createElement("span"), { className: "dz-text", textContent: "Drop a file or click to choose" });
+  drop.appendChild(dz);
+
+  const input = document.createElement("input");
+  input.type = "file"; input.id = "file_" + opt.key; input.accept = opt.accept || ""; input.className = "hidden";
+
+  const clear = document.createElement("button");
+  clear.type = "button"; clear.className = "secondary dz-clear hidden"; clear.textContent = "Remove";
+
+  const setFile = (name, text) => {
+    uploads[opt.key] = { name, text };
+    dz.textContent = name; drop.classList.add("has-file"); clear.classList.remove("hidden");
+  };
+  const clearFile = () => {
+    delete uploads[opt.key];
+    dz.textContent = "Drop a file or click to choose"; drop.classList.remove("has-file");
+    clear.classList.add("hidden"); input.value = "";
+  };
+
+  input.addEventListener("change", async () => { const f = input.files[0]; if (f) setFile(f.name, await f.text()); });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+  drop.addEventListener("drop", async (e) => {
+    e.preventDefault(); drop.classList.remove("drag");
+    const f = e.dataTransfer.files[0]; if (f) setFile(f.name, await f.text());
+  });
+  clear.addEventListener("click", clearFile);
+
+  wrap.append(drop, input, clear);
+  if (opt.hint) wrap.appendChild(hintEl(opt.hint));
+  return wrap;
+}
+
+function collectOptions(schema, o) {
+  for (const opt of schema) {
+    if (opt.type === "file") continue;
+    const el = $("opt_" + opt.key);
+    if (el) o[opt.key] = el.checked;
+    if (opt.children) collectOptions(opt.children, o);
   }
 }
 function readOptions() {
   const o = {};
-  for (const opt of OPTION_SCHEMA) o[opt.key] = $("opt_" + opt.key).checked;
+  collectOptions(OPTION_SCHEMA, o);
+  o.configUpload = uploads.configFile || null;
+  o.styleUpload = uploads.styleFile || null;
   return o;
 }
 
@@ -173,15 +249,23 @@ async function processFolder(dirHandle, files, options) {
       try {
         let html;
         if (options.styledPreview) {
-          // Folder overrides win over the bundled workshop defaults.
-          const cfg = (await readJsonFromFolder(dirHandle, "preview-config.json")) || PREVIEW_CONFIG;
-          const cssOverride = await readFileText(dirHandle, "preview-style.css");
-          const css = cssOverride !== null ? cssOverride : PREVIEW_STYLE;
-          log(
-            `Preview: styled tabular · config ${cfg === PREVIEW_CONFIG ? "bundled default" : "preview-config.json from folder"} · ` +
-            `style ${cssOverride !== null ? "preview-style.css from folder" : "bundled default"}.`,
-            "muted"
-          );
+          // Precedence for both config + style: uploaded file → folder file → bundled default.
+          let cfg = PREVIEW_CONFIG, cfgSrc = "bundled default";
+          if (options.configUpload) {
+            try { cfg = JSON.parse(options.configUpload.text); }
+            catch (e) { throw new Error(`uploaded config "${options.configUpload.name}" is not valid JSON: ${e.message}`); }
+            cfgSrc = `uploaded (${options.configUpload.name})`;
+          } else {
+            const folderCfg = await readJsonFromFolder(dirHandle, "preview-config.json");
+            if (folderCfg) { cfg = folderCfg; cfgSrc = "preview-config.json from folder"; }
+          }
+          let css = PREVIEW_STYLE, cssSrc = "bundled default";
+          if (options.styleUpload) { css = options.styleUpload.text; cssSrc = `uploaded (${options.styleUpload.name})`; }
+          else {
+            const folderCss = await readFileText(dirHandle, "preview-style.css");
+            if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }
+          }
+          log(`Preview: styled tabular · config ${cfgSrc} · style ${cssSrc}.`, "muted");
           html = await crateToPreviewHtml(crate, { template: PREVIEW_TEMPLATE, config: cfg, css });
         } else {
           log("Preview: plain (library default template).", "muted");
