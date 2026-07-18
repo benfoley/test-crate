@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>resources2crate</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a2029;
+    --panel-2: #222a35;
+    --border: #2d3742;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4f9cf9;
+    --accent-hover: #6aabfa;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  header .tag { color: var(--muted); font-size: 13px; }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) 1fr;
+    gap: 0;
+    min-height: 0;
+  }
+  .config {
+    padding: 24px 28px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .output {
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 14px;
+    font-weight: 600;
+  }
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .field .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  input[type="text"], input[type="number"], select {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .checkbox {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .checkbox label { margin: 0; }
+  .folder-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .folder-box .name { font-family: var(--mono); font-size: 13px; word-break: break-all; }
+  .folder-box .name.empty { color: var(--muted); }
+  button {
+    background: var(--accent);
+    color: #041018;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { background: var(--accent-hover); }
+  button.secondary {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.secondary:hover { background: var(--border); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .run-row { margin-top: 8px; }
+  .run-row button { width: 100%; padding: 12px; font-size: 15px; }
+  .log {
+    flex: 1;
+    background: #0b0f14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-y: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    min-height: 0;
+  }
+  .log .l-info { color: var(--text); }
+  .log .l-muted { color: var(--muted); }
+  .log .l-ok { color: var(--ok); }
+  .log .l-warn { color: var(--warn); }
+  .log .l-err { color: var(--err); }
+  .summary {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    min-width: 90px;
+  }
+  .stat .num { font-size: 22px; font-weight: 600; }
+  .stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .unsupported {
+    margin: 28px;
+    padding: 20px 24px;
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid var(--err);
+    border-radius: 10px;
+  }
+  .unsupported h2 { color: var(--err); }
+  code { font-family: var(--mono); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>resources2crate</h1>
+  <span class="tag">pick a folder &middot; configure &middot; process in place</span>
+</header>
+
+<!-- Shown when the browser lacks the File System Access API -->
+<div id="unsupported" class="unsupported hidden">
+  <h2>This browser can't run the app</h2>
+  <p>This tool uses the <strong>File System Access API</strong>, which needs a Chromium browser
+  (Chrome or Edge) running over <code>https://</code> or <code>http://localhost</code>.</p>
+  <p>Opening the file directly with <code>file://</code> won't work. See the README for how to
+  serve it locally.</p>
+</div>
+
+<main id="app">
+  <!-- ============ CONFIG PANEL ============ -->
+  <section class="config">
+    <h2>1. Folder</h2>
+    <div class="folder-box">
+      <span id="folderName" class="name empty">No folder selected</span>
+      <button id="pickBtn" class="secondary">Choose&hellip;</button>
+    </div>
+
+    <h2>2. Options</h2>
+    <div id="optionsForm"><!-- built from OPTION_SCHEMA at runtime --></div>
+
+    <h2>3. Run</h2>
+    <div class="run-row">
+      <button id="runBtn" disabled>Run</button>
+    </div>
+  </section>
+
+  <!-- ============ OUTPUT PANEL ============ -->
+  <section class="output">
+    <h2>Results</h2>
+    <div class="summary">
+      <div class="stat"><div id="statFiles" class="num">&mdash;</div><div class="lbl">Files seen</div></div>
+      <div class="stat"><div id="statWritten" class="num">&mdash;</div><div class="lbl">Files written</div></div>
+      <div class="stat"><div id="statTime" class="num">&mdash;</div><div class="lbl">Time</div></div>
+    </div>
+    <div id="log" class="log"><span class="l-muted">Ready. Choose a folder to begin.</span></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+/* ============================================================================
+ * OPTION SCHEMA
+ * ----------------------------------------------------------------------------
+ * This drives the config form. Add/remove entries here and the UI + the options
+ * object passed to processFolder() update automatically.
+ *
+ *   type:    "text" | "number" | "checkbox" | "select"
+ *   key:     property name on the `options` object
+ *   label:   shown in the UI
+ *   default: initial value
+ *   hint:    optional helper text
+ *   choices: for "select" only — array of { value, label }
+ * ==========================================================================*/
+const OPTION_SCHEMA = [
+  { type: "text",     key: "crateName", label: "Crate name",
+    default: "My Crate", hint: "Written into the output manifest." },
+  { type: "text",     key: "outputFile", label: "Output filename",
+    default: "manifest.json", hint: "Created/overwritten in the chosen folder." },
+  { type: "number",   key: "maxDepth",  label: "Max folder depth",
+    default: 5, hint: "How many levels deep to scan. 0 = top level only." },
+  { type: "select",   key: "format",    label: "Output format",
+    default: "json",
+    choices: [
+      { value: "json",  label: "JSON (pretty)" },
+      { value: "jsonl", label: "JSON Lines (one file per line)" }
+    ]
+  },
+  { type: "checkbox", key: "includeHidden", label: "Include hidden files (dot-files)",
+    default: false },
+  { type: "checkbox", key: "overwrite", label: "Overwrite output if it exists",
+    default: true },
+];
+
+/* ============================================================================
+ * DOM refs + tiny helpers
+ * ==========================================================================*/
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+
+function log(msg, cls = "info") {
+  const span = document.createElement("span");
+  span.className = "l-" + cls;
+  span.textContent = msg + "\n";
+  logEl.appendChild(span);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() { logEl.textContent = ""; }
+
+/* ============================================================================
+ * Build the options form from the schema
+ * ==========================================================================*/
+function buildForm() {
+  const form = $("optionsForm");
+  form.innerHTML = "";
+  for (const opt of OPTION_SCHEMA) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+
+    if (opt.type === "checkbox") {
+      wrap.classList.add("checkbox");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "opt_" + opt.key;
+      input.checked = !!opt.default;
+      const label = document.createElement("label");
+      label.htmlFor = input.id;
+      label.textContent = opt.label;
+      wrap.append(input, label);
+    } else {
+      const label = document.createElement("label");
+      label.htmlFor = "opt_" + opt.key;
+      label.textContent = opt.label;
+      wrap.appendChild(label);
+
+      let input;
+      if (opt.type === "select") {
+        input = document.createElement("select");
+        for (const c of opt.choices) {
+          const o = document.createElement("option");
+          o.value = c.value;
+          o.textContent = c.label;
+          input.appendChild(o);
+        }
+        input.value = opt.default;
+      } else {
+        input = document.createElement("input");
+        input.type = opt.type === "number" ? "number" : "text";
+        input.value = opt.default;
+      }
+      input.id = "opt_" + opt.key;
+      wrap.appendChild(input);
+
+      if (opt.hint) {
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = opt.hint;
+        wrap.appendChild(hint);
+      }
+    }
+    form.appendChild(wrap);
+  }
+}
+
+/* Read the current form values into a plain options object. */
+function readOptions() {
+  const options = {};
+  for (const opt of OPTION_SCHEMA) {
+    const el = $("opt_" + opt.key);
+    if (opt.type === "checkbox") options[opt.key] = el.checked;
+    else if (opt.type === "number") options[opt.key] = Number(el.value);
+    else options[opt.key] = el.value;
+  }
+  return options;
+}
+
+/* ============================================================================
+ * File System Access plumbing
+ * ==========================================================================*/
+let dirHandle = null;
+
+async function verifyPermission(handle, readWrite) {
+  const opts = { mode: readWrite ? "readwrite" : "read" };
+  if ((await handle.queryPermission(opts)) === "granted") return true;
+  if ((await handle.requestPermission(opts)) === "granted") return true;
+  return false;
+}
+
+async function pickFolder() {
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+  } catch (e) {
+    if (e && e.name === "AbortError") return; // user cancelled
+    log("Could not open folder: " + e.message, "err");
+    return;
+  }
+  $("folderName").textContent = dirHandle.name;
+  $("folderName").classList.remove("empty");
+  $("runBtn").disabled = false;
+  clearLog();
+  log("Folder selected: " + dirHandle.name, "ok");
+  log("Set your options, then click Run.", "muted");
+}
+
+/* Recursively walk a directory handle, collecting file entries. */
+async function walkDirectory(handle, options, depth = 0, prefix = "") {
+  const files = [];
+  for await (const entry of handle.values()) {
+    const isHidden = entry.name.startsWith(".");
+    if (isHidden && !options.includeHidden) continue;
+    const path = prefix ? prefix + "/" + entry.name : entry.name;
+
+    if (entry.kind === "file") {
+      const file = await entry.getFile();
+      files.push({
+        path,
+        name: entry.name,
+        size: file.size,
+        lastModified: file.lastModified,
+        type: file.type || "",
+      });
+    } else if (entry.kind === "directory" && depth < options.maxDepth) {
+      const nested = await walkDirectory(entry, options, depth + 1, path);
+      files.push(...nested);
+    }
+  }
+  return files;
+}
+
+/* Write text to a file inside the chosen directory. */
+async function writeFile(handle, filename, contents) {
+  const fileHandle = await handle.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(contents);
+  await writable.close();
+}
+
+/* Check whether a filename already exists at the top level. */
+async function fileExists(handle, filename) {
+  try {
+    await handle.getFileHandle(filename, { create: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ============================================================================
+ *                        >>> YOUR LOGIC GOES HERE <<<
+ * ----------------------------------------------------------------------------
+ * This is the one function you replace. It receives:
+ *   dirHandle - the chosen directory (read + write)
+ *   files     - array of { path, name, size, lastModified, type } from the walk
+ *   options   - the config object from the form (keys match OPTION_SCHEMA)
+ *   ctx       - { log, writeFile, fileExists } helpers
+ *
+ * Return an object; whatever `written` count you report shows in the UI.
+ *
+ * The placeholder below just builds a manifest of the files it found and
+ * writes it back into the folder — enough to prove the read + write round-trip.
+ * ==========================================================================*/
+async function processFolder(dirHandle, files, options, ctx) {
+  ctx.log(`Scanned ${files.length} file(s).`, "info");
+
+  // --- placeholder "processing": build a manifest -------------------------
+  const manifest = {
+    name: options.crateName,
+    generatedBy: "resources2crate (scaffold)",
+    root: dirHandle.name,
+    fileCount: files.length,
+    files: files.map((f) => ({
+      path: f.path,
+      bytes: f.size,
+      lastModified: new Date(f.lastModified).toISOString(),
+      type: f.type,
+    })),
+  };
+
+  let contents;
+  if (options.format === "jsonl") {
+    contents = files
+      .map((f) => JSON.stringify({ path: f.path, bytes: f.size }))
+      .join("\n");
+  } else {
+    contents = JSON.stringify(manifest, null, 2);
+  }
+
+  // --- write it back into the folder --------------------------------------
+  if (!options.overwrite && (await ctx.fileExists(dirHandle, options.outputFile))) {
+    ctx.log(`"${options.outputFile}" already exists and overwrite is off — skipping write.`, "warn");
+    return { written: 0 };
+  }
+
+  await ctx.writeFile(dirHandle, options.outputFile, contents);
+  ctx.log(`Wrote ${options.outputFile} (${contents.length} bytes).`, "ok");
+
+  return { written: 1 };
+}
+/* ======================= end of replaceable section ======================= */
+
+/* ============================================================================
+ * Run orchestration
+ * ==========================================================================*/
+async function run() {
+  if (!dirHandle) return;
+  const runBtn = $("runBtn");
+  runBtn.disabled = true;
+  runBtn.textContent = "Running…";
+
+  const started = performance.now();
+  $("statFiles").textContent = "—";
+  $("statWritten").textContent = "—";
+  $("statTime").textContent = "—";
+
+  try {
+    if (!(await verifyPermission(dirHandle, true))) {
+      log("Permission to read/write the folder was denied.", "err");
+      return;
+    }
+
+    const options = readOptions();
+    log("Options: " + JSON.stringify(options), "muted");
+
+    const files = await walkDirectory(dirHandle, options);
+    $("statFiles").textContent = files.length;
+
+    const ctx = { log, writeFile, fileExists };
+    const result = await processFolder(dirHandle, files, options, ctx);
+
+    $("statWritten").textContent = (result && result.written) || 0;
+    const secs = ((performance.now() - started) / 1000).toFixed(2);
+    $("statTime").textContent = secs + "s";
+    log("Done in " + secs + "s.", "ok");
+  } catch (e) {
+    log("Error: " + (e && e.message ? e.message : e), "err");
+    console.error(e);
+  } finally {
+    runBtn.disabled = false;
+    runBtn.textContent = "Run";
+  }
+}
+
+/* ============================================================================
+ * Boot
+ * ==========================================================================*/
+function boot() {
+  if (!("showDirectoryPicker" in window)) {
+    $("unsupported").classList.remove("hidden");
+    $("app").classList.add("hidden");
+    return;
+  }
+  buildForm();
+  $("pickBtn").addEventListener("click", pickFolder);
+  $("runBtn").addEventListener("click", run);
+}
+boot();
+</script>
+</body>
+</html>
