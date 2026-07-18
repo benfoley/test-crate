@@ -323,7 +323,22 @@ async function pickFolder() {
     return;
   }
   $("ctxFolder").textContent = dirHandle.name;
+  await refreshModeCards();
   showView("view-mode");
+}
+
+// Offer "Show" only when the folder already has crate output to view:
+// an ro-crate-metadata.json or an ro-crate-preview.html. A fresh folder with
+// neither shows the Build card alone.
+async function refreshModeCards() {
+  let hasJson = false, hasHtml = false;
+  if (dirHandle) {
+    try {
+      hasJson = await fileExists(dirHandle, JSON_FILE);
+      hasHtml = await fileExists(dirHandle, HTML_FILE);
+    } catch { /* treat as none → hide Show */ }
+  }
+  $("cardShow").classList.toggle("hidden", !(hasJson || hasHtml));
 }
 function openBuild() {
   clearLog();
@@ -401,7 +416,7 @@ function boot() {
 
   $("pickBtn").addEventListener("click", pickFolder);
   $("changeFolderBtn").addEventListener("click", pickFolder);
-  $("menuBtn").addEventListener("click", () => showView("view-mode"));
+  $("menuBtn").addEventListener("click", async () => { await refreshModeCards(); showView("view-mode"); });
   $("cardBuild").addEventListener("click", openBuild);
   $("cardShow").addEventListener("click", openShow);
   $("showTabPreview").addEventListener("click", () => renderShow("preview"));
