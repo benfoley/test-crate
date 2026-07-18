@@ -294,7 +294,6 @@ async function run() {
   try {
     if (!(await verifyPermission(dirHandle, true))) { log("Permission to read/write the folder was denied.", "err"); return; }
     const options = readOptions();
-    log("Options: " + JSON.stringify(options), "muted");
     const files = await walkDirectory(dirHandle);
     const result = await processFolder(dirHandle, files, options);
     $("statFiles").textContent = result.files;
