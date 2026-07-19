@@ -73,6 +73,7 @@ function showView(name) {
   $("contextBar").classList.toggle("hidden", !dirHandle);
   $("menuBtn").classList.toggle("hidden", !(name === "view-build" || name === "view-show"));
   $("settingsBtn").classList.toggle("hidden", name !== "view-build");
+  $("rebuildBtn").classList.toggle("hidden", name !== "view-show");
 }
 
 /* ---------- options form ---------- */
