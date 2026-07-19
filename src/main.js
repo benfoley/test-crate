@@ -25,7 +25,6 @@ const XLSX_FILE = "ro-crate-metadata.xlsx";
 const HTML_FILE = "ro-crate-preview.html";
 
 const OPTION_SCHEMA = [
-  { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
   { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true, children: [
     { key: "styledPreview", label: "Styled tabular preview (custom template + CSS)", default: true,
       hint: "Off = the library's plain preview.", children: [
@@ -37,8 +36,6 @@ const OPTION_SCHEMA = [
   ] },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
     hint: "Matches filenames against a bundled copy of the AUSTLANG data pack — fully offline, no network." },
-  { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
-    hint: "Only applies with the option above. More matches, more false positives." },
   { key: "merge", label: "Merge metadata from a spreadsheet", default: false,
     hint: "Reads an .xlsx and merges its columns into matching entities (by their @id) before generating outputs.", children: [
     { key: "mergeFile", type: "file", label: "Spreadsheet (XLSX)", binary: true,
@@ -47,6 +44,13 @@ const OPTION_SCHEMA = [
     { key: "mergeConfigFile", type: "file", label: "Mapping config (JSON)", accept: ".json,application/json",
       hint: "Optional. Column→property mappings and sheet name. Overrides the bundled default and any merge-config.json in the folder." },
   ] },
+];
+
+// Shown in the Settings modal (accessed from the button next to Menu).
+const SETTINGS_SCHEMA = [
+  { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
+  { key: "includeAlternateNames", label: "Match AUSTLANG alternate names", default: false,
+    hint: "Only applies when “Identify subject languages” is on. More matches, more false positives." },
   { key: "overwrite", label: "Overwrite existing outputs", default: true },
 ];
 
@@ -68,6 +72,7 @@ function showView(name) {
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== name);
   $("contextBar").classList.toggle("hidden", !dirHandle);
   $("menuBtn").classList.toggle("hidden", !(name === "view-build" || name === "view-show"));
+  $("settingsBtn").classList.toggle("hidden", name !== "view-build");
 }
 
 /* ---------- options form ---------- */
@@ -78,10 +83,13 @@ const uploads = {};
 function hintEl(text) { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; }
 
 function buildForm() {
+  Object.keys(uploads).forEach((k) => delete uploads[k]);
   const form = $("optionsForm");
   form.innerHTML = "";
-  Object.keys(uploads).forEach((k) => delete uploads[k]);
   renderOptions(OPTION_SCHEMA, form);
+  const settings = $("settingsForm");
+  settings.innerHTML = "";
+  renderOptions(SETTINGS_SCHEMA, settings);
 }
 
 function renderOptions(schema, parent) {
@@ -166,6 +174,7 @@ function collectOptions(schema, o) {
 function readOptions() {
   const o = {};
   collectOptions(OPTION_SCHEMA, o);
+  collectOptions(SETTINGS_SCHEMA, o);
   o.configUpload = uploads.configFile || null;
   o.styleUpload = uploads.styleFile || null;
   o.mergeUpload = uploads.mergeFile || null;
@@ -468,6 +477,9 @@ function boot() {
   $("pickBtn").addEventListener("click", pickFolder);
   $("changeFolderBtn").addEventListener("click", pickFolder);
   $("menuBtn").addEventListener("click", async () => { await refreshModeCards(); showView("view-mode"); });
+  $("settingsBtn").addEventListener("click", () => $("settingsModal").classList.remove("hidden"));
+  $("settingsClose").addEventListener("click", () => $("settingsModal").classList.add("hidden"));
+  $("settingsModal").addEventListener("click", (e) => { if (e.target === $("settingsModal")) $("settingsModal").classList.add("hidden"); });
   $("cardBuild").addEventListener("click", openBuild);
   $("cardShow").addEventListener("click", openShow);
   $("showTabPreview").addEventListener("click", () => renderShow("preview"));

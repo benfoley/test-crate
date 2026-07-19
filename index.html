@@ -92,10 +92,11 @@
 
 <div id="app" class="hidden" style="flex:1; display:flex; flex-direction:column; min-height:0;">
   <div id="contextBar" class="context-bar hidden">
+    <button id="menuBtn" class="secondary hidden" style="padding:5px 10px;">&larr; Menu</button>
+    <button id="settingsBtn" class="secondary hidden" style="padding:5px 10px;">&#9881; Settings</button>
     <span class="folder"><span class="k">Folder:</span> <span id="ctxFolder"></span></span>
     <button id="changeFolderBtn" class="secondary" style="padding:5px 10px;">Change</button>
     <div class="spacer"></div>
-    <button id="menuBtn" class="secondary hidden" style="padding:5px 10px;">&larr; Menu</button>
   </div>
 
   <main>
@@ -180,6 +181,16 @@
     <div class="actions">
       <button id="modalCancel" class="secondary">Cancel</button>
       <button id="modalBuild">Build one</button>
+    </div>
+  </div>
+</div>
+
+<div id="settingsModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>Settings</h3>
+    <div id="settingsForm"></div>
+    <div class="actions">
+      <button id="settingsClose">Done</button>
     </div>
   </div>
 </div>
