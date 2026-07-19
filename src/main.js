@@ -347,6 +347,7 @@ async function run() {
     console.error(e);
   } finally {
     runBtn.disabled = false; runBtn.textContent = "Build RO-Crate";
+    $("saveLogBtn").disabled = false;
   }
 }
 
@@ -380,8 +381,21 @@ async function refreshModeCards() {
 function openBuild() {
   clearLog();
   $("showHtmlBtn").classList.add("hidden");
+  $("saveLogBtn").disabled = true;
   log("Set your options, then click Build RO-Crate.", "muted");
   showView("view-build");
+}
+
+// Download the current build log as a .log file.
+function saveLog() {
+  const text = $("log").textContent || "";
+  if (!text.trim()) return;
+  const name = `resources2crate-${dirHandle ? dirHandle.name : "build"}.log`;
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 let showHtml = null, showJson = null, previewUrl = null;
 
@@ -464,6 +478,7 @@ function boot() {
   $("cardShow").addEventListener("keydown", key(openShow));
   $("runBtn").addEventListener("click", run);
   $("showHtmlBtn").addEventListener("click", () => openHtmlInNewTab(buildHtml));
+  $("saveLogBtn").addEventListener("click", saveLog);
   $("rebuildBtn").addEventListener("click", openBuild);
   $("modalCancel").addEventListener("click", () => $("modal").classList.add("hidden"));
   $("modalBuild").addEventListener("click", () => { $("modal").classList.add("hidden"); openBuild(); });
