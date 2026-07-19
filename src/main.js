@@ -5,7 +5,7 @@
 
 import {
   buildFileMetadata, buildCrate, crateToJsonString, crateToXlsxBytes, crateToPreviewHtml,
-  GENERATED_FILENAMES, CONTROL_FILENAMES,
+  mergeXlsxIntoCrate, GENERATED_FILENAMES, CONTROL_FILENAMES,
 } from "./crate.js";
 // ./austlang.js (and its bundled AUSTLANG data pack) is loaded lazily via
 // dynamic import() only when language lookups are enabled — see run() — so the
@@ -16,6 +16,9 @@ import { DEFAULT_CONFIG, DEFAULT_SAMPLE_DATA } from "./defaults.js";
 import PREVIEW_TEMPLATE from "./preview_template.html?raw";
 import PREVIEW_CONFIG from "./preview_config.json";
 import PREVIEW_STYLE from "./preview_style.css?raw";
+// Default column→property mapping for the spreadsheet merge. A folder may
+// override it with its own merge-config.json (see processFolder).
+import MERGE_CONFIG from "./merge_config.json";
 
 const JSON_FILE = "ro-crate-metadata.json";
 const XLSX_FILE = "ro-crate-metadata.xlsx";
@@ -36,6 +39,14 @@ const OPTION_SCHEMA = [
     hint: "Matches filenames against a bundled copy of the AUSTLANG data pack — fully offline, no network." },
   { key: "includeAlternateNames", label: "…also match AUSTLANG alternate names", default: false,
     hint: "Only applies with the option above. More matches, more false positives." },
+  { key: "merge", label: "Merge metadata from a spreadsheet", default: false,
+    hint: "Reads an .xlsx and merges its columns into matching entities (by their @id) before generating outputs.", children: [
+    { key: "mergeFile", type: "file", label: "Spreadsheet (XLSX)", binary: true,
+      accept: ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      hint: "Rows are matched to entities by the @id column." },
+    { key: "mergeConfigFile", type: "file", label: "Mapping config (JSON)", accept: ".json,application/json",
+      hint: "Optional. Column→property mappings and sheet name. Overrides the bundled default and any merge-config.json in the folder." },
+  ] },
   { key: "overwrite", label: "Overwrite existing outputs", default: true },
 ];
 
@@ -118,9 +129,11 @@ function buildFileField(opt) {
   const clear = document.createElement("button");
   clear.type = "button"; clear.className = "secondary dz-clear hidden"; clear.textContent = "Remove";
 
-  const setFile = (name, text) => {
-    uploads[opt.key] = { name, text };
-    dz.textContent = name; drop.classList.add("has-file"); clear.classList.remove("hidden");
+  // Store the File itself; its bytes/text are read at build time (supports
+  // binary files like .xlsx as well as text config/style).
+  const setFile = (file) => {
+    uploads[opt.key] = { name: file.name, file };
+    dz.textContent = file.name; drop.classList.add("has-file"); clear.classList.remove("hidden");
   };
   const clearFile = () => {
     delete uploads[opt.key];
@@ -128,12 +141,12 @@ function buildFileField(opt) {
     clear.classList.add("hidden"); input.value = "";
   };
 
-  input.addEventListener("change", async () => { const f = input.files[0]; if (f) setFile(f.name, await f.text()); });
+  input.addEventListener("change", () => { const f = input.files[0]; if (f) setFile(f); });
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
-  drop.addEventListener("drop", async (e) => {
+  drop.addEventListener("drop", (e) => {
     e.preventDefault(); drop.classList.remove("drag");
-    const f = e.dataTransfer.files[0]; if (f) setFile(f.name, await f.text());
+    const f = e.dataTransfer.files[0]; if (f) setFile(f);
   });
   clear.addEventListener("click", clearFile);
 
@@ -155,6 +168,8 @@ function readOptions() {
   collectOptions(OPTION_SCHEMA, o);
   o.configUpload = uploads.configFile || null;
   o.styleUpload = uploads.styleFile || null;
+  o.mergeUpload = uploads.mergeFile || null;
+  o.mergeConfigUpload = uploads.mergeConfigFile || null;
   return o;
 }
 
@@ -226,6 +241,27 @@ async function processFolder(dirHandle, files, options) {
   }
 
   const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log);
+
+  // Optional: merge metadata from an uploaded spreadsheet (before outputs).
+  if (options.merge && options.mergeUpload) {
+    // Mapping config precedence: uploaded file → folder file → bundled default.
+    let mergeConfig = MERGE_CONFIG, mcSrc = "bundled default";
+    if (options.mergeConfigUpload) {
+      const mcText = await options.mergeConfigUpload.file.text();
+      try { mergeConfig = JSON.parse(mcText); }
+      catch (e) { throw new Error(`uploaded merge config "${options.mergeConfigUpload.name}" is not valid JSON: ${e.message}`); }
+      mcSrc = `uploaded (${options.mergeConfigUpload.name})`;
+    } else {
+      const folderMc = await readJsonFromFolder(dirHandle, "merge-config.json");
+      if (folderMc) { mergeConfig = folderMc; mcSrc = "merge-config.json from folder"; }
+    }
+    log(`Merging ${options.mergeUpload.name} · mapping ${mcSrc}.`, "muted");
+    const bytes = await options.mergeUpload.file.arrayBuffer();
+    await mergeXlsxIntoCrate(crate, bytes, mergeConfig, log);
+  } else if (options.merge && !options.mergeUpload) {
+    log("Merge is on but no spreadsheet was selected — skipping merge.", "warn");
+  }
+
   const entities = crate.getJson()["@graph"].length;
 
   // ro-crate-metadata.json
@@ -252,7 +288,8 @@ async function processFolder(dirHandle, files, options) {
           // Precedence for both config + style: uploaded file → folder file → bundled default.
           let cfg = PREVIEW_CONFIG, cfgSrc = "bundled default";
           if (options.configUpload) {
-            try { cfg = JSON.parse(options.configUpload.text); }
+            const cfgText = await options.configUpload.file.text();
+            try { cfg = JSON.parse(cfgText); }
             catch (e) { throw new Error(`uploaded config "${options.configUpload.name}" is not valid JSON: ${e.message}`); }
             cfgSrc = `uploaded (${options.configUpload.name})`;
           } else {
@@ -260,7 +297,7 @@ async function processFolder(dirHandle, files, options) {
             if (folderCfg) { cfg = folderCfg; cfgSrc = "preview-config.json from folder"; }
           }
           let css = PREVIEW_STYLE, cssSrc = "bundled default";
-          if (options.styleUpload) { css = options.styleUpload.text; cssSrc = `uploaded (${options.styleUpload.name})`; }
+          if (options.styleUpload) { css = await options.styleUpload.file.text(); cssSrc = `uploaded (${options.styleUpload.name})`; }
           else {
             const folderCss = await readFileText(dirHandle, "preview-style.css");
             if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }

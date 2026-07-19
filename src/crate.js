@@ -13,6 +13,7 @@ import { ROCrate } from "ro-crate";
 // (custom template + config + css) on the dyirbal-workshop branch.
 import { renderSinglePage, renderTemplate, roCrateToJSON } from "ro-crate-html-lite/lib/preview.js";
 import Workbook from "ro-crate-excel/lib/workbook.js";
+import ExcelJS from "exceljs";
 import { CUSTOM_PROPERTIES } from "./defaults.js";
 import { DEFAULT_LAYOUT } from "./default_layout.js";
 
@@ -220,4 +221,109 @@ export async function crateToPreviewHtml(crate, opts = {}) {
     href.includes("%2F") ? `href="${href.replace(/%2F/g, "/")}"` : match
   );
   return html;
+}
+
+/* ---------- spreadsheet merge (ported from corpus-tools-dyirbal/merge.js) ---------- */
+
+// ExcelJS cell values can be plain scalars or rich objects (formula results,
+// rich text, hyperlinks); normalise to a plain string.
+function cellText(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") {
+    if (typeof v.text === "string") return v.text;
+    if (Array.isArray(v.richText)) return v.richText.map((r) => r.text).join("");
+    if (v.result !== undefined) return String(v.result);
+    if (v.hyperlink && v.text) return String(v.text);
+    return "";
+  }
+  return String(v);
+}
+
+// Merge a spreadsheet's rows into matching crate entities (by an "@id" column),
+// applying the config's column→property mappings. Typed mappings split on comma
+// or slash and generate linked entities. Mutates `crate` in place; returns stats.
+export async function mergeXlsxIntoCrate(crate, xlsxData, mergeConfig, log = () => {}) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(xlsxData);
+
+  let sheet;
+  if (wb.worksheets.length > 1) {
+    sheet = mergeConfig.sheet ? wb.getWorksheet(mergeConfig.sheet) : wb.worksheets[0];
+    if (!sheet) throw new Error(`Sheet "${mergeConfig.sheet}" not found in the workbook`);
+  } else {
+    sheet = wb.worksheets[0];
+  }
+  if (!sheet) throw new Error("The spreadsheet has no worksheets");
+
+  const headers = [];
+  const dataRows = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) headers.push(...row.values.slice(1).map(cellText));
+    else if (row.values.length > 1) dataRows.push(row.values.slice(1));
+  });
+
+  const idCol = headers.indexOf("@id");
+  if (idCol === -1) throw new Error('The spreadsheet needs an "@id" column');
+
+  const entityById = new Map();
+  crate.graph.forEach((e) => { if (e["@id"]) entityById.set(e["@id"], e); });
+
+  const mappings = Array.isArray(mergeConfig.mapping) ? mergeConfig.mapping : [];
+  let merged = 0, generated = 0;
+  const missingCols = new Set();
+  const matchedIds = new Set();   // entity @ids that a spreadsheet row matched
+  const unmatchedRowIds = [];     // spreadsheet @ids with no matching entity
+
+  for (const row of dataRows) {
+    const entityId = cellText(row[idCol]).trim();
+    if (!entityId) continue;
+    const entity = entityById.get(entityId);
+    if (!entity) { unmatchedRowIds.push(entityId); continue; }
+    matchedIds.add(entityId);
+
+    for (const mapping of mappings) {
+      const col = headers.indexOf(mapping.source);
+      if (col === -1) { missingCols.add(mapping.source); continue; }
+      const value = cellText(row[col]).trim();
+      if (!value) continue;
+
+      if (mapping.type) {
+        const values = value
+          .split(/\s*[,/]\s*/).map((v) => v.trim()).filter(Boolean)
+          .map((v) => v.replace(/[\[\]?()']/g, "").trim()).filter(Boolean);
+        if (!values.length) continue;
+        const refs = values.map((val) => {
+          const id = `#${val.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}`;
+          if (!entityById.get(id)) {
+            const ge = { "@id": id, "@type": mapping.type, name: val };
+            crate.addEntity(ge);
+            entityById.set(id, ge);
+            generated++;
+          }
+          return { "@id": id };
+        });
+        entity[mapping.target] = refs.length === 1 ? refs[0] : refs;
+        merged++;
+      } else {
+        entity[mapping.target] = value;
+        merged++;
+      }
+    }
+  }
+
+  // File entities in the crate that no spreadsheet row matched (by exact @id) —
+  // these get no merged metadata (e.g. no encodingFormat). Usually a path/name
+  // mismatch between the folder and the spreadsheet's @id column.
+  const isFile = (e) => { const t = e["@type"]; return Array.isArray(t) ? t.includes("File") : t === "File"; };
+  const unmatchedFiles = crate.graph.filter((e) => isFile(e) && e["@id"] && !matchedIds.has(e["@id"])).map((e) => e["@id"]);
+
+  const sample = (arr, n = 12) => arr.slice(0, n).map((s) => `\n    • ${s}`).join("") + (arr.length > n ? `\n    …and ${arr.length - n} more` : "");
+
+  if (missingCols.size) log(`Merge: columns not in spreadsheet, skipped: ${[...missingCols].join(", ")}.`, "warn");
+  if (unmatchedFiles.length)
+    log(`Merge: ${unmatchedFiles.length} file(s) had NO matching spreadsheet row — no metadata merged (check the @id path):${sample(unmatchedFiles)}`, "warn");
+  if (unmatchedRowIds.length)
+    log(`Merge: ${unmatchedRowIds.length} spreadsheet row(s) matched no entity in the crate:${sample(unmatchedRowIds)}`, "warn");
+  log(`Merged ${merged} value(s) from "${sheet.name}" into ${matchedIds.size} entity/ies; generated ${generated} new entity/ies.`, "ok");
+  return { merged, generated, skipped: unmatchedRowIds.length, unmatchedFiles: unmatchedFiles.length, sheet: sheet.name };
 }
