@@ -26,8 +26,10 @@ const HTML_FILE = "ro-crate-preview.html";
 
 const OPTION_SCHEMA = [
   { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true, children: [
-    { key: "styledPreview", label: "Styled tabular preview (custom template + CSS)", default: true,
+    { key: "styledPreview", label: "Upload template files", default: true,
       hint: "Off = the library's plain preview.", children: [
+      { key: "templateFile", type: "file", label: "Template (HTML)", accept: ".html,text/html",
+        hint: "Optional. Overrides the bundled template." },
       { key: "configFile", type: "file", label: "Config (JSON)", accept: ".json,application/json",
         hint: "Optional. Overrides the bundled config and any preview-config.json in the folder." },
       { key: "styleFile", type: "file", label: "Style (CSS)", accept: ".css,text/css",
@@ -78,7 +80,7 @@ function showView(name) {
 
 /* ---------- options form ---------- */
 // Uploaded config/style files (from the dropzones), keyed by option key:
-// { configFile: { name, text }, styleFile: { name, text } }
+// { templateFile: { name, file }, configFile: { name, file }, styleFile: { name, file } }
 const uploads = {};
 
 function hintEl(text) { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; }
@@ -176,6 +178,7 @@ function readOptions() {
   const o = {};
   collectOptions(OPTION_SCHEMA, o);
   collectOptions(SETTINGS_SCHEMA, o);
+  o.templateUpload = uploads.templateFile || null;
   o.configUpload = uploads.configFile || null;
   o.styleUpload = uploads.styleFile || null;
   o.mergeUpload = uploads.mergeFile || null;
@@ -295,7 +298,13 @@ async function processFolder(dirHandle, files, options) {
       try {
         let html;
         if (options.styledPreview) {
-          // Precedence for both config + style: uploaded file → folder file → bundled default.
+          // Precedence for template/config/style: uploaded file → folder file (config/style only) → bundled default.
+          let template = PREVIEW_TEMPLATE, templateSrc = "bundled default";
+          if (options.templateUpload) {
+            template = await options.templateUpload.file.text();
+            templateSrc = `uploaded (${options.templateUpload.name})`;
+          }
+
           let cfg = PREVIEW_CONFIG, cfgSrc = "bundled default";
           if (options.configUpload) {
             const cfgText = await options.configUpload.file.text();
@@ -312,8 +321,8 @@ async function processFolder(dirHandle, files, options) {
             const folderCss = await readFileText(dirHandle, "preview-style.css");
             if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }
           }
-          log(`Preview: styled tabular · config ${cfgSrc} · style ${cssSrc}.`, "muted");
-          html = await crateToPreviewHtml(crate, { template: PREVIEW_TEMPLATE, config: cfg, css });
+          log(`Preview: styled tabular · template ${templateSrc} · config ${cfgSrc} · style ${cssSrc}.`, "muted");
+          html = await crateToPreviewHtml(crate, { template, config: cfg, css });
         } else {
           log("Preview: plain (library default template).", "muted");
           html = await crateToPreviewHtml(crate);
