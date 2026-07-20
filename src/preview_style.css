@@ -79,6 +79,8 @@ entity
 .entity-panel {
   background: var(--surface-panel);
   min-height: 89vh;
+  display: flex;
+  flex-direction: column;
   max-width: 1400px;
   margin: 0 auto;
   overflow-x: hidden;
@@ -152,6 +154,8 @@ entity
 .entity-content-row {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .entity-display-adjacent .entity-content-row {
