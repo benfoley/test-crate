@@ -408,6 +408,85 @@ function saveLog() {
   URL.revokeObjectURL(url);
 }
 let showHtml = null, showJson = null, previewUrl = null;
+let previewFileUrls = [];
+
+function revokePreviewUrls() {
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+  previewFileUrls.forEach((u) => URL.revokeObjectURL(u));
+  previewFileUrls = [];
+}
+
+function isAbsoluteLikeUrl(value) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//") || value.startsWith("#");
+}
+
+function splitUrlParts(value) {
+  const hashIdx = value.indexOf("#");
+  const queryIdx = value.indexOf("?");
+  const cut = [hashIdx, queryIdx].filter((n) => n >= 0).reduce((a, b) => Math.min(a, b), value.length);
+  return {
+    base: value.slice(0, cut),
+    suffix: value.slice(cut),
+  };
+}
+
+function normalizeRelativePath(value) {
+  let v = (value || "").trim();
+  if (!v) return "";
+  try { v = decodeURIComponent(v); } catch { /* keep as-is */ }
+  v = v.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
+  const out = [];
+  for (const part of v.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") { out.pop(); continue; }
+    out.push(part);
+  }
+  return out.join("/");
+}
+
+async function buildFileUrlMap(handle) {
+  const map = new Map();
+  const created = [];
+  async function walk(h, prefix = "") {
+    for await (const entry of h.values()) {
+      if (entry.kind === "directory") {
+        const next = prefix ? `${prefix}/${entry.name}` : entry.name;
+        await walk(entry, next);
+        continue;
+      }
+      if (entry.kind !== "file") continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const file = await entry.getFile();
+      const url = URL.createObjectURL(file);
+      created.push(url);
+      map.set(rel, url);
+      // Accept both encoded and decoded lookup forms.
+      map.set(encodeURI(rel), url);
+    }
+  }
+  await walk(handle, "");
+  return { map, created };
+}
+
+async function materializePreviewHtml(html, handle) {
+  const { map, created } = await buildFileUrlMap(handle);
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  for (const el of doc.querySelectorAll("[src],[href]")) {
+    for (const attr of ["src", "href"]) {
+      const raw = el.getAttribute(attr);
+      if (!raw || isAbsoluteLikeUrl(raw)) continue;
+      const { base, suffix } = splitUrlParts(raw);
+      const key = normalizeRelativePath(base);
+      if (!key) continue;
+      const mapped = map.get(key) || map.get(encodeURI(key));
+      if (mapped) el.setAttribute(attr, mapped + suffix);
+    }
+  }
+  return { html: `<!doctype html>\n${doc.documentElement.outerHTML}`, created };
+}
 
 async function openShow() {
   if (!dirHandle) return;
@@ -460,11 +539,26 @@ function renderShow(mode) {
 // which don't work inside an embedded/srcdoc frame, so it needs its own URL.
 // Must be called synchronously from a click handler (no awaits before it) so
 // the browser doesn't treat window.open as an unsolicited popup.
-function openHtmlInNewTab(html) {
+async function openHtmlInNewTab(html) {
   if (!html) return;
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  previewUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-  window.open(previewUrl, "_blank");
+  const popup = window.open("about:blank", "_blank");
+  if (!popup) return;
+  popup.document.title = "Loading preview...";
+  popup.document.body.textContent = "Loading preview...";
+  try {
+    revokePreviewUrls();
+    let toOpen = html;
+    if (dirHandle) {
+      const materialized = await materializePreviewHtml(html, dirHandle);
+      toOpen = materialized.html;
+      previewFileUrls = materialized.created;
+    }
+    previewUrl = URL.createObjectURL(new Blob([toOpen], { type: "text/html" }));
+    popup.location.replace(previewUrl);
+  } catch (e) {
+    popup.document.body.textContent = "Failed to open preview: " + (e && e.message ? e.message : e);
+    console.error(e);
+  }
 }
 function openPreviewWindow() { openHtmlInNewTab(showHtml); }
 
