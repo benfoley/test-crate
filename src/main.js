@@ -18,9 +18,17 @@ import MERGE_CONFIG from "./merge_config.json";
 const JSON_FILE = "ro-crate-metadata.json";
 const XLSX_FILE = "ro-crate-metadata.xlsx";
 const HTML_FILE = "ro-crate-preview.html";
+const TEMPLATE_REPO_OWNER = "benfoley";
+const TEMPLATE_REPO_NAME = "rocss-template-repo";
+const TEMPLATE_REPO_REF = "main";
 
 const OPTION_SCHEMA = [
   { key: "makeHtml", label: "Generate ro-crate-preview.html", default: true, children: [
+    { key: "templateRepoPreset", label: "Template from rocss-template-repo", default: false,
+      hint: "Pick a folder from the online template repo.", children: [
+      { key: "templateRepoFolder", type: "select", label: "Template folder",
+        placeholder: "Loading folders…", hint: "Select one folder from the template repo." },
+    ] },
     { key: "templateSourceUrl", label: "Template folder URL", default: false,
       hint: "Use a public GitHub folder containing template/config/style files.", children: [
       { key: "templateSourceUrlValue", type: "url", label: "Template folder URL",
@@ -92,6 +100,7 @@ function buildForm() {
   form.innerHTML = "";
   renderOptions(OPTION_SCHEMA, form);
   setupTemplateSourceExclusivity();
+  loadTemplateRepoFolderOptions();
   const settings = $("settingsForm");
   settings.innerHTML = "";
   renderOptions(SETTINGS_SCHEMA, settings);
@@ -100,25 +109,36 @@ function buildForm() {
 function setupTemplateSourceExclusivity() {
   const uploadOpt = $("opt_styledPreview");
   const urlOpt = $("opt_templateSourceUrl");
-  if (!uploadOpt || !urlOpt) return;
+  const repoOpt = $("opt_templateRepoPreset");
+  if (!uploadOpt || !urlOpt || !repoOpt) return;
 
   const sync = (changed) => {
-    if (!uploadOpt.checked || !urlOpt.checked) return;
-    if (changed === "upload") urlOpt.checked = false;
-    else if (changed === "url") uploadOpt.checked = false;
-    else urlOpt.checked = false;
+    const active = [];
+    if (uploadOpt.checked) active.push("upload");
+    if (urlOpt.checked) active.push("url");
+    if (repoOpt.checked) active.push("repo");
+    if (active.length <= 1) return;
+
+    if (changed === "upload") { urlOpt.checked = false; repoOpt.checked = false; }
+    else if (changed === "url") { uploadOpt.checked = false; repoOpt.checked = false; }
+    else if (changed === "repo") { uploadOpt.checked = false; urlOpt.checked = false; }
+    else { urlOpt.checked = false; repoOpt.checked = false; }
+
     uploadOpt.dispatchEvent(new Event("change"));
     urlOpt.dispatchEvent(new Event("change"));
+    repoOpt.dispatchEvent(new Event("change"));
   };
 
   uploadOpt.addEventListener("change", () => sync("upload"));
   urlOpt.addEventListener("change", () => sync("url"));
+  repoOpt.addEventListener("change", () => sync("repo"));
 }
 
 function renderOptions(schema, parent) {
   for (const opt of schema) {
     if (opt.type === "file") { parent.appendChild(buildFileField(opt)); continue; }
     if (opt.type === "url") { parent.appendChild(buildUrlField(opt)); continue; }
+    if (opt.type === "select") { parent.appendChild(buildSelectField(opt)); continue; }
 
     const wrap = document.createElement("div");
     wrap.className = "field";
@@ -211,12 +231,80 @@ function buildUrlField(opt) {
   return wrap;
 }
 
+function buildSelectField(opt) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  wrap.appendChild(Object.assign(document.createElement("div"), { className: "file-label", textContent: opt.label }));
+
+  const select = document.createElement("select");
+  select.id = "opt_" + opt.key;
+  select.style.width = "100%";
+  select.style.padding = "9px 10px";
+  select.style.borderRadius = "8px";
+  select.style.border = "1px solid var(--border)";
+  select.style.background = "var(--panel-2)";
+  select.style.color = "var(--text)";
+  select.style.fontFamily = "var(--mono)";
+  select.style.fontSize = "12px";
+
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = opt.placeholder || "Select…";
+  select.appendChild(ph);
+
+  wrap.appendChild(select);
+  if (opt.hint) wrap.appendChild(hintEl(opt.hint));
+  return wrap;
+}
+
+async function loadTemplateRepoFolderOptions() {
+  const select = $("opt_templateRepoFolder");
+  if (!select) return;
+  select.disabled = true;
+  try {
+    const apiUrl = `https://api.github.com/repos/${TEMPLATE_REPO_OWNER}/${TEMPLATE_REPO_NAME}/contents?ref=${encodeURIComponent(TEMPLATE_REPO_REF)}`;
+    const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const entries = await res.json();
+    if (!Array.isArray(entries)) throw new Error("Unexpected API response");
+    const folders = entries
+      .filter((e) => e && e.type === "dir" && typeof e.name === "string")
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b));
+
+    select.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = folders.length ? "Select a template folder…" : "No folders found";
+    select.appendChild(ph);
+    folders.forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+    select.disabled = folders.length === 0;
+  } catch (e) {
+    select.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = `Could not load folders (${e.message})`;
+    select.appendChild(ph);
+    select.disabled = true;
+  }
+}
+
 function collectOptions(schema, o) {
   for (const opt of schema) {
     if (opt.type === "file") continue;
     if (opt.type === "url") {
       const el = $("opt_" + opt.key);
       if (el) o[opt.key] = (el.value || "").trim();
+      continue;
+    }
+    if (opt.type === "select") {
+      const el = $("opt_" + opt.key);
+      if (el) o[opt.key] = el.value || "";
       continue;
     }
     const el = $("opt_" + opt.key);
@@ -356,6 +444,11 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
   };
 }
 
+function buildGitHubTreeUrl(owner, repo, ref, folderPath) {
+  const safePath = String(folderPath || "").split("/").map((p) => encodeURIComponent(p)).join("/");
+  return `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(ref)}/${safePath}`;
+}
+
 /* ---------- Build ---------- */
 async function processFolder(dirHandle, files, options) {
   const config = (await readJsonFromFolder(dirHandle, "config.json")) || DEFAULT_CONFIG;
@@ -421,12 +514,26 @@ async function processFolder(dirHandle, files, options) {
       try {
         let html;
         const urlSelected = !!options.templateSourceUrl;
+        const repoSelected = !!options.templateRepoPreset;
         const sourceUrl = (options.templateSourceUrlValue || "").trim();
-        if (options.styledPreview || urlSelected) {
+        if (options.styledPreview || urlSelected || repoSelected) {
           // Precedence for template/config/style: uploaded file → URL folder → local folder.
           let template = null, templateSrc = "none";
           let cfg = null, cfgSrc = "none";
           let css = "", cssSrc = "none";
+
+          if (repoSelected) {
+            const selectedFolder = (options.templateRepoFolder || "").trim();
+            if (!selectedFolder) throw new Error("Template repo source is selected but no template folder was chosen.");
+            const repoUrl = buildGitHubTreeUrl(TEMPLATE_REPO_OWNER, TEMPLATE_REPO_NAME, TEMPLATE_REPO_REF, selectedFolder);
+            const remote = await fetchTemplateBundleFromUrl(repoUrl);
+            template = remote.template;
+            cfg = remote.config;
+            css = remote.css;
+            templateSrc = remote.files.template ? `repo (${selectedFolder}/${remote.files.template})` : `repo (${selectedFolder}; no html found)`;
+            cfgSrc = remote.files.config ? `repo (${selectedFolder}/${remote.files.config})` : "none";
+            cssSrc = remote.files.style ? `repo (${selectedFolder}/${remote.files.style})` : "none";
+          }
 
           if (urlSelected) {
             if (!sourceUrl) throw new Error("Template folder URL is selected but no URL was provided.");
@@ -443,7 +550,7 @@ async function processFolder(dirHandle, files, options) {
             template = await options.templateUpload.file.text();
             templateSrc = `uploaded (${options.templateUpload.name})`;
           } else {
-            const folderTemplate = !urlSelected ? await readFileText(dirHandle, "preview-template.html") : null;
+            const folderTemplate = (!urlSelected && !repoSelected) ? await readFileText(dirHandle, "preview-template.html") : null;
             if (folderTemplate !== null) { template = folderTemplate; templateSrc = "preview-template.html from folder"; }
           }
 
@@ -452,13 +559,13 @@ async function processFolder(dirHandle, files, options) {
             try { cfg = JSON.parse(cfgText); }
             catch (e) { throw new Error(`uploaded config "${options.configUpload.name}" is not valid JSON: ${e.message}`); }
             cfgSrc = `uploaded (${options.configUpload.name})`;
-          } else if (!urlSelected) {
+          } else if (!urlSelected && !repoSelected) {
             const folderCfg = await readJsonFromFolder(dirHandle, "preview-config.json");
             if (folderCfg) { cfg = folderCfg; cfgSrc = "preview-config.json from folder"; }
           }
 
           if (options.styledPreview && options.styleUpload) { css = await options.styleUpload.file.text(); cssSrc = `uploaded (${options.styleUpload.name})`; }
-          else if (!urlSelected) {
+          else if (!urlSelected && !repoSelected) {
             const folderCss = await readFileText(dirHandle, "preview-style.css");
             if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }
           }
