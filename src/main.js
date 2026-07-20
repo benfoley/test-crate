@@ -11,11 +11,6 @@ import {
 // dynamic import() only when language lookups are enabled — see run() — so the
 // ~730 kB data pack stays out of the main bundle.
 import { DEFAULT_CONFIG, DEFAULT_SAMPLE_DATA } from "./defaults.js";
-// Bundled defaults for the styled ("tabular") HTML preview. A folder may override
-// these with its own preview-config.json / preview-style.css (see processFolder).
-import PREVIEW_TEMPLATE from "./preview_template.html?raw";
-import PREVIEW_CONFIG from "./preview_config.json";
-import PREVIEW_STYLE from "./preview_style.css?raw";
 // Default column→property mapping for the spreadsheet merge. A folder may
 // override it with its own merge-config.json (see processFolder).
 import MERGE_CONFIG from "./merge_config.json";
@@ -29,11 +24,11 @@ const OPTION_SCHEMA = [
     { key: "styledPreview", label: "Upload template files", default: true,
       hint: "Off = the library's plain preview.", children: [
       { key: "templateFile", type: "file", label: "Template (HTML)", accept: ".html,text/html",
-        hint: "Optional. Overrides the bundled template." },
+        hint: "Optional. Uses your custom preview template; if omitted, the library default preview is used." },
       { key: "configFile", type: "file", label: "Config (JSON)", accept: ".json,application/json",
-        hint: "Optional. Overrides the bundled config and any preview-config.json in the folder." },
+        hint: "Optional. Upload to override preview-config.json from the folder." },
       { key: "styleFile", type: "file", label: "Style (CSS)", accept: ".css,text/css",
-        hint: "Optional. Overrides the bundled style and any preview-style.css in the folder." },
+        hint: "Optional. Upload to override preview-style.css from the folder." },
     ] },
   ] },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
@@ -298,14 +293,17 @@ async function processFolder(dirHandle, files, options) {
       try {
         let html;
         if (options.styledPreview) {
-          // Precedence for template/config/style: uploaded file → folder file (config/style only) → bundled default.
-          let template = PREVIEW_TEMPLATE, templateSrc = "bundled default";
+          // Precedence for template/config/style: uploaded file → folder file.
+          let template = null, templateSrc = "none";
           if (options.templateUpload) {
             template = await options.templateUpload.file.text();
             templateSrc = `uploaded (${options.templateUpload.name})`;
+          } else {
+            const folderTemplate = await readFileText(dirHandle, "preview-template.html");
+            if (folderTemplate !== null) { template = folderTemplate; templateSrc = "preview-template.html from folder"; }
           }
 
-          let cfg = PREVIEW_CONFIG, cfgSrc = "bundled default";
+          let cfg = null, cfgSrc = "none";
           if (options.configUpload) {
             const cfgText = await options.configUpload.file.text();
             try { cfg = JSON.parse(cfgText); }
@@ -315,14 +313,19 @@ async function processFolder(dirHandle, files, options) {
             const folderCfg = await readJsonFromFolder(dirHandle, "preview-config.json");
             if (folderCfg) { cfg = folderCfg; cfgSrc = "preview-config.json from folder"; }
           }
-          let css = PREVIEW_STYLE, cssSrc = "bundled default";
+          let css = "", cssSrc = "none";
           if (options.styleUpload) { css = await options.styleUpload.file.text(); cssSrc = `uploaded (${options.styleUpload.name})`; }
           else {
             const folderCss = await readFileText(dirHandle, "preview-style.css");
             if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }
           }
-          log(`Preview: styled tabular · template ${templateSrc} · config ${cfgSrc} · style ${cssSrc}.`, "muted");
-          html = await crateToPreviewHtml(crate, { template, config: cfg, css });
+          if (template) {
+            log(`Preview: styled tabular · template ${templateSrc} · config ${cfgSrc} · style ${cssSrc}.`, "muted");
+            html = await crateToPreviewHtml(crate, { template, config: cfg, css });
+          } else {
+            log("Preview: plain (library default template; no custom template file provided).", "muted");
+            html = await crateToPreviewHtml(crate);
+          }
         } else {
           log("Preview: plain (library default template).", "muted");
           html = await crateToPreviewHtml(crate);
