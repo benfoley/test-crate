@@ -251,9 +251,11 @@ export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log =
     crate.addEntity(config.metadataLicence);
   }
 
-  for (const p of CUSTOM_PROPERTIES) crate.addEntity(p);
-  if (includeSampleData && sampleData) {
-    addSampleData(crate, sampleData);
+  if (includeSampleData) {
+    for (const p of CUSTOM_PROPERTIES) crate.addEntity(p);
+    if (sampleData) {
+      addSampleData(crate, sampleData);
+    }
   }
   addFolderEntities(crate, filesWithMeta, opts);
   addFileEntities(crate, filesWithMeta, langByIndex);
@@ -340,9 +342,26 @@ export async function readXlsxHeaders(xlsxData) {
   return { sheetName: sheet.name, headers };
 }
 
+// "custom:" is this app's own made-up namespace (arcp://name,custom/terms#) —
+// unlike "ldac:", which is a real published vocabulary, nothing external
+// defines what a custom: property means. Turns "dateCaptured" into
+// "Date Captured" for a generated rdf:Property's name.
+const CUSTOM_PROPERTY_PREFIX = "custom:";
+const CUSTOM_PROPERTY_BASE = "arcp://name,custom/terms#";
+function prettifyPropertyLocalName(localName) {
+  return localName
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
 // Merge a spreadsheet's rows into matching crate entities (by an "@id" column),
 // applying the config's column→property mappings. Typed mappings split on comma
-// or slash and generate linked entities. Mutates `crate` in place; returns stats.
+// or slash and generate linked entities. Any "custom:" target property that's
+// actually used but has no rdf:Property entity yet (the hand-written ones in
+// defaults.js, or a prior merge) gets a minimal one generated so it's not left
+// undocumented in the graph. Mutates `crate` in place; returns stats.
 export async function mergeXlsxIntoCrate(crate, xlsxData, mergeConfig, log = () => {}) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(xlsxData);
@@ -374,6 +393,7 @@ export async function mergeXlsxIntoCrate(crate, xlsxData, mergeConfig, log = () 
   const missingCols = new Set();
   const matchedIds = new Set();   // entity @ids that a spreadsheet row matched
   const unmatchedRowIds = [];     // spreadsheet @ids with no matching entity
+  const usedCustomProps = new Set(); // "custom:" target properties actually written
 
   for (const row of dataRows) {
     const entityId = cellText(row[idCol]).trim();
@@ -409,8 +429,17 @@ export async function mergeXlsxIntoCrate(crate, xlsxData, mergeConfig, log = () 
         entity[mapping.target] = value;
         merged++;
       }
+      if (mapping.target.startsWith(CUSTOM_PROPERTY_PREFIX)) usedCustomProps.add(mapping.target);
     }
   }
+
+  const generatedProps = [];
+  usedCustomProps.forEach((target) => {
+    const id = CUSTOM_PROPERTY_BASE + target.slice(CUSTOM_PROPERTY_PREFIX.length);
+    if (crate.hasEntity(id)) return;
+    crate.addEntity({ "@id": id, "@type": "rdf:Property", name: prettifyPropertyLocalName(target.slice(CUSTOM_PROPERTY_PREFIX.length)), description: "" });
+    generatedProps.push(target);
+  });
 
   // File entities in the crate that no spreadsheet row matched (by exact @id) —
   // these get no merged metadata (e.g. no encodingFormat). Usually a path/name
@@ -425,6 +454,8 @@ export async function mergeXlsxIntoCrate(crate, xlsxData, mergeConfig, log = () 
     log(`Merge: ${unmatchedFiles.length} file(s) had NO matching spreadsheet row — no metadata merged (check the @id path):${sample(unmatchedFiles)}`, "warn");
   if (unmatchedRowIds.length)
     log(`Merge: ${unmatchedRowIds.length} spreadsheet row(s) matched no entity in the crate:${sample(unmatchedRowIds)}`, "warn");
+  if (generatedProps.length)
+    log(`Merge: generated rdf:Property definitions for ${generatedProps.length} custom propert${generatedProps.length === 1 ? "y" : "ies"} not yet described in the crate: ${generatedProps.sort().join(", ")}.`, "ok");
   log(`Merged ${merged} value(s) from "${sheet.name}" into ${matchedIds.size} entity/ies; generated ${generated} new entity/ies.`, "ok");
-  return { merged, generated, skipped: unmatchedRowIds.length, unmatchedFiles: unmatchedFiles.length, sheet: sheet.name };
+  return { merged, generated, generatedProperties: generatedProps.length, skipped: unmatchedRowIds.length, unmatchedFiles: unmatchedFiles.length, sheet: sheet.name };
 }

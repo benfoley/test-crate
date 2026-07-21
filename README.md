@@ -60,7 +60,8 @@ that reproduces `corpus-tools-dyirbal`'s crate structure using the `ROCrate` cla
   top-level folder (standalone top-level files get a synthetic object);
 - one `RepositoryObject` per top-level folder, `hasPart` listing every file beneath it;
 - one `File` entity per file (`@id` = relative path, `isPartOf`, `custom:possibleDuplicate`);
-- the custom `rdf:Property` definitions, and sample people/places/localities;
+- optional sample entities from `sample-data.json` (or built-in defaults), including
+  custom `rdf:Property` definitions and sample people/places/localities;
 - hash `@id`s of `RepositoryObject`s rewritten to `arcp://…/<name>` on export;
 - optional AUSTLANG subject-language identification (filename-based; see options).
 
@@ -72,6 +73,7 @@ The crate object is then serialized with `crate.getJson()` (JSON), fed to `ro-cr
 | option | effect |
 |--------|--------|
 | Generate ro-crate-metadata.xlsx | write the spreadsheet output (on by default) |
+| Include sample data entities | include entities from `sample-data.json` (or built-in defaults), including custom property definitions |
 | Top-level folders are: Objects or Collections | Objects = existing behavior (`RepositoryObject`); Collections = `RepositoryCollection` with child folder objects and a `Files` object for direct files |
 | Generate ro-crate-preview.html | write the HTML preview (on by default) |
 | Template from rocss-template-repo | pick a folder from `benfoley/rocss-template-repo`; downloads and uses that folder's template config |
@@ -86,8 +88,9 @@ The crate object is then serialized with `crate.getJson()` (JSON), fed to `ro-cr
 Root-dataset metadata and sample data come from built-in defaults (`src/defaults.js`,
 the Dyirbal workshop config). Drop `config.json` and/or `sample-data.json` into the folder to
 override them per-folder (same shapes as `corpus-tools-dyirbal`). `config.dataDir` is ignored
-— the chosen folder is the data dir. Generated outputs and these two control files are skipped
-during the scan.
+— the chosen folder is the data dir. If “Include sample data entities” is off, `sample-data.json`
+and built-in sample entities (including custom property definitions) are not added to the crate.
+Generated outputs and these two control files are skipped during the scan.
 
 ---
 

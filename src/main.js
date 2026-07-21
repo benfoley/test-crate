@@ -56,7 +56,7 @@ const OPTION_SCHEMA = [
 // Shown in the Settings modal (accessed from the button next to Menu).
 const SETTINGS_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
-  { key: "includeSampleData", label: "Include sample data entities", default: true,
+  { key: "includeSampleData", label: "Include sample data entities", default: false,
     hint: "Adds entities from sample-data.json (or built-in defaults) to the crate graph." },
   { key: "topLevelFolderType", type: "select", label: "Top-level folders are", default: "object",
     options: [
