@@ -73,7 +73,10 @@ The crate object is then serialized with `crate.getJson()` (JSON), fed to `ro-cr
 |--------|--------|
 | Generate ro-crate-metadata.xlsx | write the spreadsheet output (on by default) |
 | Generate ro-crate-preview.html | write the HTML preview (on by default) |
-| Identify subject languages (AUSTLANG, by filename) | the original's `-l`; filename-based only. `fetch` to the LDaCA service — may be CORS-blocked in the browser, degrades gracefully |
+| Template from rocss-template-repo | pick a folder from `benfoley/rocss-template-repo`; downloads and uses that folder's template config |
+| Template folder URL | use any public GitHub folder URL; downloads and uses that folder's template config |
+| Upload template files | upload a single `config.json`; template and style are resolved from values inside that config |
+| Identify subject languages (AUSTLANG, by filename) | the original's `-l`; filename-based only; uses the bundled AUSTLANG data pack offline |
 | …also match AUSTLANG alternate names | the original's `-a` |
 | Overwrite existing outputs | off = skip files that already exist |
 

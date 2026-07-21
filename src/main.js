@@ -37,12 +37,8 @@ const OPTION_SCHEMA = [
     ] },
     { key: "styledPreview", label: "Upload template files", default: false,
       hint: "Off = the library's plain preview.", children: [
-      { key: "templateFile", type: "file", label: "Template (HTML)", accept: ".html,text/html",
-        hint: "Optional. Uses your custom preview template; if omitted, the library default preview is used." },
-      { key: "configFile", type: "file", label: "Config (JSON)", accept: ".json,application/json",
-        hint: "Optional. Upload to override preview-config.json from the folder." },
-      { key: "styleFile", type: "file", label: "Style (CSS)", accept: ".css,text/css",
-        hint: "Optional. Upload to override preview-style.css from the folder." },
+      { key: "configFile", type: "file", label: "Config (JSON)", accept: ".json,.css,.html,application/json,text/css,text/html",
+        hint: "Required. If config uses relative paths, include sibling template/style files in the same upload/drop." },
     ] },
   ] },
   { key: "enableLanguageLookups", label: "Identify subject languages (AUSTLANG, by filename)", default: false,
@@ -88,14 +84,15 @@ function showView(name) {
 }
 
 /* ---------- options form ---------- */
-// Uploaded config/style files (from the dropzones), keyed by option key:
-// { templateFile: { name, file }, configFile: { name, file }, styleFile: { name, file } }
+// Uploaded files (from dropzones), keyed by option key.
 const uploads = {};
+let uploadedConfigDirHandle = null;
 
 function hintEl(text) { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; }
 
 function buildForm() {
   Object.keys(uploads).forEach((k) => delete uploads[k]);
+  uploadedConfigDirHandle = null;
   const form = $("optionsForm");
   form.innerHTML = "";
   renderOptions(OPTION_SCHEMA, form);
@@ -172,33 +169,60 @@ function buildFileField(opt) {
 
   const drop = document.createElement("label");
   drop.className = "dropzone"; drop.htmlFor = "file_" + opt.key;
-  const dz = Object.assign(document.createElement("span"), { className: "dz-text", textContent: "Drop a file or click to choose" });
+  const defaultDropText = opt.key === "configFile"
+    ? "Drop config, style and template files here"
+    : "Drop a file or click to choose";
+  const dz = Object.assign(document.createElement("span"), { className: "dz-text", textContent: defaultDropText });
   drop.appendChild(dz);
 
   const input = document.createElement("input");
   input.type = "file"; input.id = "file_" + opt.key; input.accept = opt.accept || ""; input.className = "hidden";
+  if (opt.key === "configFile") input.multiple = true;
 
   const clear = document.createElement("button");
   clear.type = "button"; clear.className = "secondary dz-clear hidden"; clear.textContent = "Remove";
 
   // Store the File itself; its bytes/text are read at build time (supports
   // binary files like .xlsx as well as text config/style).
-  const setFile = (file) => {
-    uploads[opt.key] = { name: file.name, file };
-    dz.textContent = file.name; drop.classList.add("has-file"); clear.classList.remove("hidden");
+  const setFiles = (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (opt.key === "configFile") {
+      uploadedConfigDirHandle = null;
+      const cfg = files.find((f) => f.name.toLowerCase() === "config.json")
+        || files.find((f) => f.name.toLowerCase().endsWith(".json"))
+        || files[0];
+      const cfgPath = String(cfg.webkitRelativePath || cfg.name || "").replace(/\\/g, "/");
+      const cfgDir = cfgPath.includes("/") ? cfgPath.slice(0, cfgPath.lastIndexOf("/") + 1) : "";
+      const siblingFiles = new Map();
+      files.forEach((f) => {
+        const p = String(f.webkitRelativePath || f.name || "").replace(/\\/g, "/");
+        const rel = cfgDir && p.startsWith(cfgDir) ? p.slice(cfgDir.length) : p;
+        if (rel) siblingFiles.set(rel, f);
+        if (f.name) siblingFiles.set(f.name, f);
+      });
+      uploads[opt.key] = { name: cfg.name, file: cfg, siblingFiles };
+      dz.textContent = files.length > 1 ? `${cfg.name} (+${files.length - 1} file(s))` : cfg.name;
+    } else {
+      const file = files[0];
+      uploads[opt.key] = { name: file.name, file };
+      dz.textContent = file.name;
+    }
+    drop.classList.add("has-file");
+    clear.classList.remove("hidden");
   };
   const clearFile = () => {
     delete uploads[opt.key];
-    dz.textContent = "Drop a file or click to choose"; drop.classList.remove("has-file");
+    dz.textContent = defaultDropText; drop.classList.remove("has-file");
     clear.classList.add("hidden"); input.value = "";
   };
 
-  input.addEventListener("change", () => { const f = input.files[0]; if (f) setFile(f); });
+  input.addEventListener("change", () => { if (input.files && input.files.length) setFiles(input.files); });
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
   drop.addEventListener("drop", (e) => {
     e.preventDefault(); drop.classList.remove("drag");
-    const f = e.dataTransfer.files[0]; if (f) setFile(f);
+    if (e.dataTransfer.files && e.dataTransfer.files.length) setFiles(e.dataTransfer.files);
   });
   clear.addEventListener("click", clearFile);
 
@@ -316,9 +340,7 @@ function readOptions() {
   const o = {};
   collectOptions(OPTION_SCHEMA, o);
   collectOptions(SETTINGS_SCHEMA, o);
-  o.templateUpload = uploads.templateFile || null;
   o.configUpload = uploads.configFile || null;
-  o.styleUpload = uploads.styleFile || null;
   o.mergeUpload = uploads.mergeFile || null;
   o.mergeConfigUpload = uploads.mergeConfigFile || null;
   return o;
@@ -364,6 +386,28 @@ async function readFileText(handle, filename) {
     throw e;
   }
 }
+
+async function readFileTextFromDirectory(handle, relativePath) {
+  if (!handle) return null;
+  const parts = String(relativePath || "").replace(/\\/g, "/").split("/").filter(Boolean);
+  if (!parts.length) return null;
+  let dir = handle;
+  for (let i = 0; i < parts.length - 1; i++) {
+    try { dir = await dir.getDirectoryHandle(parts[i], { create: false }); }
+    catch (e) {
+      if (e && e.name === "NotFoundError") return null;
+      throw e;
+    }
+  }
+  try {
+    const fh = await dir.getFileHandle(parts[parts.length - 1], { create: false });
+    return await (await fh.getFile()).text();
+  } catch (e) {
+    if (e && e.name === "NotFoundError") return null;
+    throw e;
+  }
+}
+
 async function readJsonFromFolder(handle, filename) {
   const text = await readFileText(handle, filename);
   if (text === null) return null;
@@ -399,6 +443,146 @@ function pickPreferredFile(files, ext, hints = []) {
   return byExt[0];
 }
 
+function getNestedValue(obj, path) {
+  let cur = obj;
+  for (const key of path.split(".")) {
+    if (!cur || typeof cur !== "object") return null;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function pickConfigString(cfg, paths) {
+  for (const p of paths) {
+    const v = getNestedValue(cfg, p);
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function isLikelyInlineTemplate(text) {
+  return /<[a-z!/][^>]*>/i.test(text);
+}
+
+function isLikelyInlineCss(text) {
+  return /[{;}]/.test(text) && /\s/.test(text);
+}
+
+function isAbsolutePathSpec(value) {
+  return /^\//.test(value) || /^[A-Za-z]:[\\/]/.test(value) || /^~\//.test(value);
+}
+
+function pathTailCandidates(value) {
+  const rel = String(value || "").replace(/^~\//, "").replace(/^[A-Za-z]:[\\/]/, "").replace(/^\/+/, "").replace(/\\/g, "/");
+  const parts = rel.split("/").filter(Boolean);
+  const out = [];
+  for (let i = 0; i < parts.length; i++) out.push(parts.slice(i).join("/"));
+  return out;
+}
+
+function hasUploadedMatch(uploadedFiles, spec) {
+  if (!uploadedFiles) return false;
+  const rel = String(spec || "").replace(/^\.\//, "").replace(/^~\//, "").replace(/^[A-Za-z]:[\\/]/, "").replace(/^\/+/, "").replace(/\\/g, "/");
+  const base = rel.split("/").pop();
+  return !!(uploadedFiles.get(rel) || uploadedFiles.get(base));
+}
+
+function needsLocalTemplateFolder(cfg, uploadedFiles) {
+  const refs = [
+    pickConfigString(cfg, ["root:template", "root.template", "template", "templateFile", "templatePath", "templateUrl", "files.template", "paths.template", "assets.template"]),
+    pickConfigString(cfg, ["style", "css", "styleFile", "stylePath", "styleUrl", "cssFile", "cssPath", "cssUrl", "files.style", "files.css", "paths.style", "paths.css", "assets.style", "assets.css"]),
+  ].filter(Boolean);
+  for (const v of refs) {
+    if (/^https?:\/\//i.test(v)) continue;
+    if (isLikelyInlineTemplate(v) || isLikelyInlineCss(v)) continue;
+    if (hasUploadedMatch(uploadedFiles, v)) continue;
+    return true;
+  }
+  return false;
+}
+
+async function ensureUploadedConfigDirectoryHandle() {
+  if (uploadedConfigDirHandle) {
+    const ok = await verifyPermission(uploadedConfigDirHandle, false);
+    if (ok) return uploadedConfigDirHandle;
+    uploadedConfigDirHandle = null;
+  }
+  try {
+    const picked = await window.showDirectoryPicker({ mode: "read" });
+    const ok = await verifyPermission(picked, false);
+    if (!ok) throw new Error("Permission to read the config folder was denied.");
+    uploadedConfigDirHandle = picked;
+    return uploadedConfigDirHandle;
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("Config folder selection was cancelled.");
+    throw e;
+  }
+}
+
+async function resolveTemplateAsset(spec, kind, { dirHandle = null, baseRawUrl = "", uploadedFiles = null } = {}) {
+  const val = String(spec || "").trim();
+  if (!val) return { text: kind === "css" ? "" : null, source: "none" };
+
+  if (kind === "template" && isLikelyInlineTemplate(val)) return { text: val, source: "inline config" };
+  if (kind === "css" && isLikelyInlineCss(val)) return { text: val, source: "inline config" };
+
+  if (/^https?:\/\//i.test(val)) {
+    const res = await fetch(val);
+    if (!res.ok) throw new Error(`Could not download ${kind} from URL (${res.status} ${res.statusText}).`);
+    return { text: await res.text(), source: `url (${val})` };
+  }
+
+  if (baseRawUrl) {
+    const url = new URL(val.replace(/^\.\//, ""), baseRawUrl).toString();
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Could not download ${kind} from config path "${val}" (${res.status} ${res.statusText}).`);
+    return { text: await res.text(), source: `url (${url})` };
+  }
+
+  if (uploadedFiles) {
+    const rel = val.replace(/^\.\//, "").replace(/^~\//, "").replace(/^[A-Za-z]:[\\/]/, "").replace(/^\/+/, "").replace(/\\/g, "/");
+    const base = rel.split("/").pop();
+    const uploaded = uploadedFiles.get(rel) || uploadedFiles.get(base);
+    if (uploaded) return { text: await uploaded.text(), source: `upload (${rel})` };
+  }
+
+  if (dirHandle) {
+    if (isAbsolutePathSpec(val)) {
+      for (const candidate of pathTailCandidates(val)) {
+        const text = await readFileTextFromDirectory(dirHandle, candidate);
+        if (text !== null) return { text, source: `folder (${candidate})` };
+      }
+    } else {
+      const rel = val.replace(/^\.\//, "");
+      const text = await readFileTextFromDirectory(dirHandle, rel);
+      if (text !== null) return { text, source: `folder (${rel})` };
+    }
+  }
+
+  throw new Error(`Could not resolve ${kind} from config value "${val}".`);
+}
+
+async function resolveTemplateBundleFromConfig(cfg, opts = {}) {
+  const templateRef = pickConfigString(cfg, [
+    "root:template", "root.template",
+    "template", "templateFile", "templatePath", "templateUrl",
+    "files.template", "paths.template", "assets.template",
+  ]);
+  const styleRef = pickConfigString(cfg, [
+    "style", "css", "styleFile", "stylePath", "styleUrl", "cssFile", "cssPath", "cssUrl",
+    "files.style", "files.css", "paths.style", "paths.css", "assets.style", "assets.css",
+  ]);
+
+  const templateResolved = templateRef ? await resolveTemplateAsset(templateRef, "template", opts) : { text: null, source: "none" };
+  const styleResolved = styleRef ? await resolveTemplateAsset(styleRef, "css", opts) : { text: "", source: "none" };
+  return {
+    template: templateResolved.text,
+    css: styleResolved.text || "",
+    templateSrc: templateResolved.source,
+    cssSrc: styleResolved.source,
+  };
+}
+
 async function fetchTemplateBundleFromUrl(rawUrl) {
   const { owner, repo, ref, folderPath } = parseGitHubFolderUrl(rawUrl);
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(ref)}`;
@@ -411,9 +595,10 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
     throw new Error("Template URL does not point to a folder.");
   }
 
-  const htmlFile = pickPreferredFile(entries, ".html", ["template", "preview"]);
   const jsonFile = pickPreferredFile(entries, ".json", ["config", "preview"]);
+  const htmlFile = pickPreferredFile(entries, ".html", ["template", "preview"]);
   const cssFile = pickPreferredFile(entries, ".css", ["style", "preview"]);
+  const rawBaseUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(ref).replace(/%2F/g, "/")}/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}/`;
 
   const readText = async (entry) => {
     if (!entry || !entry.download_url) return null;
@@ -426,9 +611,27 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
   const configText = await readText(jsonFile);
   const css = (await readText(cssFile)) || "";
   let config = null;
+  let templateSrc = htmlFile ? `folder file (${htmlFile.name})` : "none";
+  let cssSrc = cssFile ? `folder file (${cssFile.name})` : "none";
   if (configText !== null) {
     try { config = JSON.parse(configText); }
     catch (e) { throw new Error(`Downloaded config file "${jsonFile.name}" is not valid JSON: ${e.message}`); }
+
+    // If config.json specifies template/style sources, those take precedence.
+    const resolved = await resolveTemplateBundleFromConfig(config, { baseRawUrl: rawBaseUrl });
+    if (resolved.template) { templateSrc = resolved.templateSrc; }
+    if (resolved.css) { cssSrc = resolved.cssSrc; }
+    return {
+      template: resolved.template || template,
+      config,
+      css: resolved.css || css,
+      sourceLabel: `${owner}/${repo}@${ref}/${folderPath}`,
+      files: {
+        template: resolved.template ? resolved.templateSrc : (htmlFile ? htmlFile.name : null),
+        config: jsonFile ? jsonFile.name : null,
+        style: resolved.css ? resolved.cssSrc : (cssFile ? cssFile.name : null),
+      },
+    };
   }
 
   return {
@@ -437,9 +640,9 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
     css,
     sourceLabel: `${owner}/${repo}@${ref}/${folderPath}`,
     files: {
-      template: htmlFile ? htmlFile.name : null,
+      template: htmlFile ? htmlFile.name : templateSrc,
       config: jsonFile ? jsonFile.name : null,
-      style: cssFile ? cssFile.name : null,
+      style: cssFile ? cssFile.name : cssSrc,
     },
   };
 }
@@ -447,6 +650,12 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
 function buildGitHubTreeUrl(owner, repo, ref, folderPath) {
   const safePath = String(folderPath || "").split("/").map((p) => encodeURIComponent(p)).join("/");
   return `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(ref)}/${safePath}`;
+}
+
+function describeRemoteSource(label, value, fallback) {
+  if (!value) return fallback;
+  if (value.startsWith("url (") || value.startsWith("inline") || value.startsWith("folder (")) return value;
+  return `${label}/${value}`;
 }
 
 /* ---------- Build ---------- */
@@ -530,9 +739,10 @@ async function processFolder(dirHandle, files, options) {
             template = remote.template;
             cfg = remote.config;
             css = remote.css;
-            templateSrc = remote.files.template ? `repo (${selectedFolder}/${remote.files.template})` : `repo (${selectedFolder}; no html found)`;
-            cfgSrc = remote.files.config ? `repo (${selectedFolder}/${remote.files.config})` : "none";
-            cssSrc = remote.files.style ? `repo (${selectedFolder}/${remote.files.style})` : "none";
+            const base = `repo (${selectedFolder})`;
+            templateSrc = describeRemoteSource(base, remote.files.template, `${base}; no template found`);
+            cfgSrc = describeRemoteSource(base, remote.files.config, "none");
+            cssSrc = describeRemoteSource(base, remote.files.style, "none");
           }
 
           if (urlSelected) {
@@ -541,17 +751,10 @@ async function processFolder(dirHandle, files, options) {
             template = remote.template;
             cfg = remote.config;
             css = remote.css;
-            templateSrc = remote.files.template ? `URL (${remote.sourceLabel}/${remote.files.template})` : `URL (${remote.sourceLabel}; no html found)`;
-            cfgSrc = remote.files.config ? `URL (${remote.sourceLabel}/${remote.files.config})` : "none";
-            cssSrc = remote.files.style ? `URL (${remote.sourceLabel}/${remote.files.style})` : "none";
-          }
-
-          if (options.styledPreview && options.templateUpload) {
-            template = await options.templateUpload.file.text();
-            templateSrc = `uploaded (${options.templateUpload.name})`;
-          } else {
-            const folderTemplate = (!urlSelected && !repoSelected) ? await readFileText(dirHandle, "preview-template.html") : null;
-            if (folderTemplate !== null) { template = folderTemplate; templateSrc = "preview-template.html from folder"; }
+            const base = `URL (${remote.sourceLabel})`;
+            templateSrc = describeRemoteSource(base, remote.files.template, `${base}; no template found`);
+            cfgSrc = describeRemoteSource(base, remote.files.config, "none");
+            cssSrc = describeRemoteSource(base, remote.files.style, "none");
           }
 
           if (options.styledPreview && options.configUpload) {
@@ -564,10 +767,18 @@ async function processFolder(dirHandle, files, options) {
             if (folderCfg) { cfg = folderCfg; cfgSrc = "preview-config.json from folder"; }
           }
 
-          if (options.styledPreview && options.styleUpload) { css = await options.styleUpload.file.text(); cssSrc = `uploaded (${options.styleUpload.name})`; }
-          else if (!urlSelected && !repoSelected) {
-            const folderCss = await readFileText(dirHandle, "preview-style.css");
-            if (folderCss !== null) { css = folderCss; cssSrc = "preview-style.css from folder"; }
+          if (options.styledPreview && cfg) {
+            const uploadedFiles = options.configUpload?.siblingFiles || null;
+            let configDirHandle = null;
+            if (needsLocalTemplateFolder(cfg, uploadedFiles)) {
+              configDirHandle = await ensureUploadedConfigDirectoryHandle();
+            }
+            const resolved = await resolveTemplateBundleFromConfig(cfg, {
+              uploadedFiles,
+              dirHandle: configDirHandle,
+            });
+            if (resolved.template) { template = resolved.template; templateSrc = resolved.templateSrc; }
+            if (resolved.css) { css = resolved.css; cssSrc = resolved.cssSrc; }
           }
           if (template) {
             log(`Preview: styled tabular · template ${templateSrc} · config ${cfgSrc} · style ${cssSrc}.`, "muted");
