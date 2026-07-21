@@ -82,12 +82,13 @@ function log(msg, cls = "info") {
 function clearLog() { logEl().textContent = ""; }
 
 /* ---------- view routing ---------- */
-const VIEWS = ["view-folder", "view-mode", "view-build", "view-show"];
+const VIEWS = ["view-folder", "view-mode", "view-crate-details", "view-build", "view-show"];
 function showView(name) {
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== name);
   $("contextBar").classList.toggle("hidden", !dirHandle);
   $("menuBtn").classList.toggle("hidden", !(name === "view-build" || name === "view-show"));
   $("settingsBtn").classList.toggle("hidden", name !== "view-build");
+  $("showBtn").classList.toggle("hidden", name !== "view-build");
   $("rebuildBtn").classList.toggle("hidden", name !== "view-show");
 }
 
@@ -363,6 +364,69 @@ function readOptions() {
   o.mergeUpload = uploads.mergeFile || null;
   o.mergeConfigUpload = uploads.mergeConfigFile || null;
   return o;
+}
+
+/* ---------- crate details (root dataset) form ---------- */
+const DEFAULT_LICENSE_URL = "https://creativecommons.org/licenses/by-nc-nd/4.0/";
+
+// Values collected from the crate-details form, merged into config.rootDataset
+// at build time. Populated when the user clicks Continue on that step.
+let rootDatasetOverride = null;
+
+function todayIsoDate() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function slugify(text) {
+  return String(text || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// Free text (just the part after "arcp://name,") -> full "arcp://name,<slug>" id.
+// Tolerates the prefix being typed/pasted in anyway by stripping it first.
+function normalizeArcpId(input) {
+  const trimmed = String(input || "").trim().replace(/^arcp:\/\/name,/i, "");
+  return `arcp://name,${slugify(trimmed) || "crate"}`;
+}
+
+function openCrateDetails() {
+  if (dirHandle) {
+    if (!$("cd_name").value.trim()) $("cd_name").value = dirHandle.name;
+    if (!$("cd_id").value.trim()) $("cd_id").value = slugify(dirHandle.name);
+  }
+  if (!$("cd_datePublished").value) $("cd_datePublished").value = todayIsoDate();
+  if (!$("cd_license").value.trim()) $("cd_license").value = DEFAULT_LICENSE_URL;
+  showView("view-crate-details");
+}
+
+// Builds the config.rootDataset fragment for this build. inLanguage and creator
+// become full entities (with @id derived from their free text) so the ro-crate
+// library registers them as linked nodes in the graph when assigned.
+function buildRootDatasetFromForm() {
+  const languageText = $("cd_inLanguage").value.trim();
+  const creatorText = $("cd_creator").value.trim();
+  const idText = $("cd_id").value.trim();
+  const name = $("cd_name").value.trim();
+  const rootDataset = {
+    "@id": normalizeArcpId(idText || name),
+    name,
+    description: $("cd_description").value.trim(),
+    datePublished: $("cd_datePublished").value || todayIsoDate(),
+    license: { "@id": $("cd_license").value.trim() || DEFAULT_LICENSE_URL },
+  };
+  if (languageText) {
+    rootDataset.inLanguage = { "@id": `#language-${slugify(languageText)}`, "@type": "Language", name: languageText };
+  }
+  if (creatorText) {
+    rootDataset.creator = { "@id": `#person-${slugify(creatorText)}`, "@type": "Person", name: creatorText };
+  }
+  return rootDataset;
+}
+
+function submitCrateDetails() {
+  rootDatasetOverride = buildRootDatasetFromForm();
+  openBuild();
 }
 
 /* ---------- File System Access ---------- */
@@ -734,7 +798,10 @@ async function processFolder(dirHandle, files, options) {
     langByIndex = await identifyAllLanguages(filesWithMeta, options.includeAlternateNames, log);
   }
 
-  const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log, {
+  const effectiveConfig = rootDatasetOverride
+    ? { ...config, rootDataset: { ...config.rootDataset, ...rootDatasetOverride } }
+    : config;
+  const crate = buildCrate(filesWithMeta, effectiveConfig, sampleData, langByIndex, log, {
     topLevelFolderType: options.topLevelFolderType,
     includeSampleData: !!options.includeSampleData,
   });
@@ -884,6 +951,9 @@ async function run() {
     // new tab synchronously (no await between the click and window.open).
     buildHtml = await readFileText(dirHandle, HTML_FILE);
     if (buildHtml !== null) $("showHtmlBtn").classList.remove("hidden");
+    // A build always writes ro-crate-metadata.json (or it already existed), so
+    // the context bar's Show button can now be enabled.
+    $("showBtn").disabled = false;
   } catch (e) {
     log("Error: " + (e && e.message ? e.message : e), "err");
     console.error(e);
@@ -909,7 +979,8 @@ async function pickFolder() {
 
 // Offer "Show" only when the folder already has crate output to view:
 // an ro-crate-metadata.json or an ro-crate-preview.html. A fresh folder with
-// neither shows the Build card alone.
+// neither shows the Build card alone, and the context bar's Show button (in
+// build mode) stays disabled until a build produces one of those files.
 async function refreshModeCards() {
   let hasJson = false, hasHtml = false;
   if (dirHandle) {
@@ -919,12 +990,14 @@ async function refreshModeCards() {
     } catch { /* treat as none → hide Show */ }
   }
   $("cardShow").classList.toggle("hidden", !(hasJson || hasHtml));
+  $("showBtn").disabled = !(hasJson || hasHtml);
 }
 function openBuild() {
   clearLog();
   $("showHtmlBtn").classList.add("hidden");
   $("saveLogBtn").disabled = true;
   log("Set your options, then click Build RO-Crate.", "muted");
+  refreshModeCards();
   showView("view-build");
 }
 
@@ -1107,19 +1180,22 @@ function boot() {
   $("settingsBtn").addEventListener("click", () => $("settingsModal").classList.remove("hidden"));
   $("settingsClose").addEventListener("click", () => $("settingsModal").classList.add("hidden"));
   $("settingsModal").addEventListener("click", (e) => { if (e.target === $("settingsModal")) $("settingsModal").classList.add("hidden"); });
-  $("cardBuild").addEventListener("click", openBuild);
+  $("cardBuild").addEventListener("click", openCrateDetails);
   $("cardShow").addEventListener("click", openShow);
+  $("showBtn").addEventListener("click", openShow);
   $("showTabPreview").addEventListener("click", () => renderShow("preview"));
   $("showTabJson").addEventListener("click", () => renderShow("json"));
   $("openPreviewBtn").addEventListener("click", openPreviewWindow);
   const key = (fn) => (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } };
-  $("cardBuild").addEventListener("keydown", key(openBuild));
+  $("cardBuild").addEventListener("keydown", key(openCrateDetails));
   $("cardShow").addEventListener("keydown", key(openShow));
+  $("crateDetailsBackBtn").addEventListener("click", () => showView("view-mode"));
+  $("crateDetailsContinueBtn").addEventListener("click", submitCrateDetails);
   $("runBtn").addEventListener("click", run);
   $("showHtmlBtn").addEventListener("click", () => openHtmlInNewTab(buildHtml));
   $("saveLogBtn").addEventListener("click", saveLog);
-  $("rebuildBtn").addEventListener("click", openBuild);
+  $("rebuildBtn").addEventListener("click", openCrateDetails);
   $("modalCancel").addEventListener("click", () => $("modal").classList.add("hidden"));
-  $("modalBuild").addEventListener("click", () => { $("modal").classList.add("hidden"); openBuild(); });
+  $("modalBuild").addEventListener("click", () => { $("modal").classList.add("hidden"); openCrateDetails(); });
 }
 boot();

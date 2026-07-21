@@ -27,6 +27,22 @@
   .mode-card { width: 250px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 22px; cursor: pointer; text-align: left; transition: border-color .12s, transform .12s; }
   .mode-card:hover { border-color: var(--accent); transform: translateY(-2px); }
   .mode-card .ic { font-size: 26px; margin-bottom: 12px; } .mode-card .t { font-size: 17px; font-weight: 600; margin-bottom: 6px; } .mode-card .d { color: var(--muted); font-size: 13px; }
+  .form-step { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 40px; overflow-y: auto; }
+  .form-step-inner { width: 100%; max-width: 480px; }
+  .form-step .lead { font-size: 22px; font-weight: 600; margin-top: 6px; }
+  .form-step .sub { color: var(--muted); margin: 6px 0 22px; }
+  .crate-form { display: flex; flex-direction: column; }
+  .crate-form .field { text-align: left; }
+  .crate-form label.file-label { display: block; }
+  .crate-form input[type="text"], .crate-form input[type="url"], .crate-form input[type="date"], .crate-form textarea {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); font-family: var(--mono); font-size: 12px;
+  }
+  .crate-form textarea { resize: vertical; font-family: inherit; font-size: 13px; }
+  .crate-form-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; }
+  .id-input-group { display: flex; align-items: stretch; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); overflow: hidden; }
+  .id-input-group .id-prefix { display: flex; align-items: center; padding: 0 0 0 10px; color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  .crate-form .id-input-group input[type="text"] { flex: 1; min-width: 0; border: none; border-radius: 0; background: transparent; padding-left: 2px; }
   .build-grid { flex: 1; display: grid; grid-template-columns: minmax(340px, 440px) 1fr; min-height: 0; }
   .config { padding: 24px 28px; border-right: 1px solid var(--border); overflow-y: auto; }
   .output { padding: 24px 28px; display: flex; flex-direction: column; min-height: 0; }
@@ -94,6 +110,7 @@
   <div id="contextBar" class="context-bar hidden">
     <button id="menuBtn" class="secondary hidden" style="padding:5px 10px;">&larr; Menu</button>
     <button id="settingsBtn" class="secondary hidden" style="padding:5px 10px;">&#9881; Settings</button>
+    <button id="showBtn" class="secondary hidden" style="padding:5px 10px;" disabled>Show</button>
     <button id="rebuildBtn" class="secondary hidden" style="padding:5px 10px;">Rebuild</button>
     <span class="folder"><span class="k">Folder:</span> <span id="ctxFolder"></span></span>
     <button id="changeFolderBtn" class="secondary" style="padding:5px 10px;">Change</button>
@@ -122,6 +139,54 @@
           <div class="ic">&#128196;</div>
           <div class="t">Show</div>
           <div class="d">Render the existing <code>ro-crate-preview.html</code> in this folder.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-crate-details" class="form-step hidden">
+      <div class="form-step-inner">
+        <div class="step-num">Step 3</div>
+        <div class="lead">Describe this crate</div>
+        <div class="sub">These details populate the RO-Crate root dataset.</div>
+        <form id="crateDetailsForm" class="crate-form" autocomplete="off">
+          <div class="field">
+            <label class="file-label" for="cd_id">Identifier</label>
+            <div class="id-input-group">
+              <span class="id-prefix">arcp://name,</span>
+              <input type="text" id="cd_id" placeholder="my-corpus" />
+            </div>
+            <div class="hint">Normalised to a slug and combined with the <code>arcp://name,</code> prefix when you continue.</div>
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_name">Name</label>
+            <input type="text" id="cd_name" placeholder="Collection name" />
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_description">Description</label>
+            <textarea id="cd_description" rows="3" placeholder="Short description"></textarea>
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_datePublished">Date published</label>
+            <input type="date" id="cd_datePublished" />
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_inLanguage">Language</label>
+            <input type="text" id="cd_inLanguage" placeholder="e.g. English" />
+            <div class="hint">Creates a Language entity.</div>
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_license">Licence</label>
+            <input type="url" id="cd_license" />
+          </div>
+          <div class="field">
+            <label class="file-label" for="cd_creator">Creator</label>
+            <input type="text" id="cd_creator" placeholder="e.g. Jane Smith" />
+            <div class="hint">Creates a Person entity.</div>
+          </div>
+        </form>
+        <div class="crate-form-actions">
+          <button id="crateDetailsBackBtn" class="secondary" type="button">&larr; Back</button>
+          <button id="crateDetailsContinueBtn" class="big" type="button">Continue</button>
         </div>
       </div>
     </section>
