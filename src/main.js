@@ -5,7 +5,7 @@
 
 import {
   buildFileMetadata, buildCrate, crateToJsonString, crateToXlsxBytes, crateToPreviewHtml,
-  mergeXlsxIntoCrate, GENERATED_FILENAMES, CONTROL_FILENAMES,
+  mergeXlsxIntoCrate, readXlsxHeaders, GENERATED_FILENAMES, CONTROL_FILENAMES,
 } from "./crate.js";
 // ./austlang.js (and its bundled AUSTLANG data pack) is loaded lazily via
 // dynamic import() only when language lookups are enabled — see run() — so the
@@ -48,8 +48,8 @@ const OPTION_SCHEMA = [
     { key: "mergeFile", type: "file", label: "Spreadsheet (XLSX)", binary: true,
       accept: ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       hint: "Rows are matched to entities by the @id column." },
-    { key: "mergeConfigFile", type: "file", label: "Mapping config (JSON)", accept: ".json,application/json",
-      hint: "Optional. Column→property mappings and sheet name. Overrides the bundled default and any merge-config.json in the folder." },
+    { key: "mergeMappingBuilder", type: "mappingBuilder", label: "Build mapping from spreadsheet columns…",
+      hint: "Reads the column headers from the spreadsheet above and lets you set a target property (and type) for each one. You can also load an existing mapping config.json from inside that dialog." },
   ] },
 ];
 
@@ -96,6 +96,11 @@ function showView(name) {
 // Uploaded files (from dropzones), keyed by option key.
 const uploads = {};
 let uploadedConfigDirHandle = null;
+// The "Build mapping…" button — only enabled once a merge spreadsheet is uploaded.
+let mergeMappingBuilderBtn = null;
+function refreshMergeMappingBuilderBtn() {
+  if (mergeMappingBuilderBtn) mergeMappingBuilderBtn.disabled = !uploads.mergeFile;
+}
 
 function hintEl(text) { const h = document.createElement("div"); h.className = "hint"; h.textContent = text; return h; }
 
@@ -145,6 +150,7 @@ function renderOptions(schema, parent) {
     if (opt.type === "file") { parent.appendChild(buildFileField(opt)); continue; }
     if (opt.type === "url") { parent.appendChild(buildUrlField(opt)); continue; }
     if (opt.type === "select") { parent.appendChild(buildSelectField(opt)); continue; }
+    if (opt.type === "mappingBuilder") { parent.appendChild(buildMappingBuilderField(opt)); continue; }
 
     const wrap = document.createElement("div");
     wrap.className = "field";
@@ -219,11 +225,13 @@ function buildFileField(opt) {
     }
     drop.classList.add("has-file");
     clear.classList.remove("hidden");
+    if (opt.key === "mergeFile") refreshMergeMappingBuilderBtn();
   };
   const clearFile = () => {
     delete uploads[opt.key];
     dz.textContent = defaultDropText; drop.classList.remove("has-file");
     clear.classList.add("hidden"); input.value = "";
+    if (opt.key === "mergeFile") refreshMergeMappingBuilderBtn();
   };
 
   input.addEventListener("change", () => { if (input.files && input.files.length) setFiles(input.files); });
@@ -299,6 +307,194 @@ function buildSelectField(opt) {
   wrap.appendChild(select);
   if (opt.hint) wrap.appendChild(hintEl(opt.hint));
   return wrap;
+}
+
+function buildMappingBuilderField(opt) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "secondary"; btn.style.width = "100%";
+  btn.textContent = opt.label;
+  btn.disabled = true;
+  btn.addEventListener("click", openMergeMappingModal);
+  mergeMappingBuilderBtn = btn;
+  refreshMergeMappingBuilderBtn();
+  wrap.appendChild(btn);
+  const status = document.createElement("div");
+  status.className = "hint"; status.id = "mergeMappingStatus";
+  status.textContent = "No custom mapping — bundled defaults will be used.";
+  wrap.appendChild(status);
+  if (opt.hint) wrap.appendChild(hintEl(opt.hint));
+  return wrap;
+}
+function updateMergeMappingStatus(mappingCount) {
+  const el = $("mergeMappingStatus");
+  if (el) el.textContent = `Custom mapping applied: ${mappingCount} column(s).`;
+}
+
+/* ---------- merge-mapping builder modal ---------- */
+// Entity types the mapping builder offers for a column — matches the
+// vocabulary already used by src/merge_config.json.
+const MAPPING_TYPE_OPTIONS = ["", "Person", "Organization", "Place", "Language", "License", "File"];
+
+// In-progress edits, keyed by source column name, kept alive across the modal
+// being closed and reopened (Cancel, backdrop click, or Apply) so nothing
+// typed is lost until the user actually reloads or picks a new spreadsheet.
+let mergeMappingDraft = {};
+// The current spreadsheet's columns, kept so a loaded mapping config.json can
+// re-render the rows without re-reading the spreadsheet.
+let mergeMappingHeaders = [];
+let mergeMappingSheetName = "";
+
+async function openMergeMappingModal() {
+  const upload = uploads.mergeFile;
+  if (!upload) {
+    alert('Select a spreadsheet in "Spreadsheet (XLSX)" first.');
+    return;
+  }
+  let headers, sheetName;
+  try {
+    const bytes = await upload.file.arrayBuffer();
+    ({ headers, sheetName } = await readXlsxHeaders(bytes));
+  } catch (e) {
+    alert("Could not read the spreadsheet: " + (e && e.message ? e.message : e));
+    return;
+  }
+  mergeMappingHeaders = headers;
+  mergeMappingSheetName = sheetName;
+  $("mappingConfigDropText").textContent = "Drop a mapping config.json here, or click to load one";
+  $("mappingConfigDrop").classList.remove("has-file");
+  $("mappingConfigError").classList.add("hidden");
+  $("mappingConfigFile").value = "";
+  renderMergeMappingRows(headers, sheetName);
+  $("mergeMappingModal").classList.remove("hidden");
+}
+
+// A loaded config.json must look like { mapping: [{ source, target, type? }, ...] }
+// (the same shape mergeXlsxIntoCrate consumes) — sheet is ignored, since the
+// spreadsheet drives which columns exist.
+function isValidMergeMappingConfig(obj) {
+  return !!obj && typeof obj === "object" && Array.isArray(obj.mapping) && obj.mapping.length > 0
+    && obj.mapping.every((m) => m && typeof m.source === "string" && typeof m.target === "string"
+      && (m.type === undefined || typeof m.type === "string"));
+}
+
+async function loadMappingConfigFile(file) {
+  const errEl = $("mappingConfigError");
+  errEl.classList.add("hidden"); errEl.textContent = "";
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch (e) {
+    errEl.textContent = "Could not parse JSON: " + (e && e.message ? e.message : e);
+    errEl.classList.remove("hidden");
+    return;
+  }
+  if (!isValidMergeMappingConfig(parsed)) {
+    errEl.textContent = 'Not a valid mapping config — expected {"mapping": [{"source": "…", "target": "…", "type": "…" (optional)}, …]}.';
+    errEl.classList.remove("hidden");
+    return;
+  }
+  parsed.mapping.forEach((m) => { mergeMappingDraft[m.source] = { target: m.target, type: m.type || "" }; });
+  $("mappingConfigDropText").textContent = file.name;
+  $("mappingConfigDrop").classList.add("has-file");
+  renderMergeMappingRows(mergeMappingHeaders, mergeMappingSheetName);
+}
+
+function renderMergeMappingRows(headers, sheetName) {
+  const container = $("mergeMappingBody");
+  container.innerHTML = "";
+  container.dataset.sheetName = sheetName || "";
+
+  const columns = headers
+    .map((h) => String(h || "").trim())
+    .filter((h) => h && h !== "@id");
+
+  if (!columns.length) {
+    container.appendChild(hintEl("No columns found in the first row of the sheet."));
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "mapping-head";
+  head.innerHTML = "<span>Source column</span><span></span><span>Target property</span><span>Type</span>";
+  container.appendChild(head);
+
+  columns.forEach((header) => {
+    const row = document.createElement("div");
+    row.className = "mapping-row";
+    row.dataset.source = header;
+
+    const src = document.createElement("div");
+    src.className = "col-source";
+    src.textContent = header;
+
+    const draft = mergeMappingDraft[header] || {};
+    // Source columns sometimes use a leading-dot convention (".author",
+    // ".language" — see merge_config.json) to flag a typed/reference column;
+    // that dot isn't part of the actual target property name.
+    const defaultTarget = header.replace(/^\.+/, "");
+
+    const target = document.createElement("input");
+    target.type = "text"; target.className = "map-target";
+    target.placeholder = "e.g. name, custom:participant";
+    // Defaults to the source column name (same as clicking the copy arrow);
+    // an explicit empty draft (the user cleared it) is respected on redraw.
+    target.value = draft.target !== undefined ? draft.target : defaultTarget;
+    target.addEventListener("input", () => {
+      mergeMappingDraft[header] = { ...mergeMappingDraft[header], target: target.value };
+    });
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button"; copyBtn.className = "map-copy-btn";
+    copyBtn.title = "Copy source column name to target property";
+    copyBtn.textContent = "→";
+    copyBtn.addEventListener("click", () => {
+      target.value = defaultTarget;
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.focus();
+    });
+
+    const type = document.createElement("select");
+    type.className = "map-type";
+    MAPPING_TYPE_OPTIONS.forEach((t) => {
+      const o = document.createElement("option");
+      o.value = t; o.textContent = t || "(plain value)";
+      type.appendChild(o);
+    });
+    type.value = draft.type || "";
+    type.addEventListener("change", () => {
+      mergeMappingDraft[header] = { ...mergeMappingDraft[header], type: type.value };
+    });
+
+    row.append(src, copyBtn, target, type);
+    container.appendChild(row);
+  });
+}
+
+function applyMergeMapping() {
+  const container = $("mergeMappingBody");
+  const sheetName = container.dataset.sheetName || "";
+  const mapping = [];
+  container.querySelectorAll(".mapping-row").forEach((row) => {
+    const target = row.querySelector(".map-target").value.trim();
+    if (!target) return;
+    const entry = { source: row.dataset.source, target };
+    const type = row.querySelector(".map-type").value;
+    if (type) entry.type = type;
+    mapping.push(entry);
+  });
+  if (!mapping.length) {
+    alert("Set a target property for at least one column before applying.");
+    return;
+  }
+  const config = sheetName ? { sheet: sheetName, mapping } : { mapping };
+  const file = new File([JSON.stringify(config, null, 2)], "merge-config.json", { type: "application/json" });
+  // No visible dropzone for this anymore — the mapping modal is the only UI
+  // for it — so processFolder's mergeConfigUpload is set directly.
+  uploads.mergeConfigFile = { name: file.name, file };
+  updateMergeMappingStatus(mapping.length);
+  $("mergeMappingModal").classList.add("hidden");
 }
 
 async function loadTemplateRepoFolderOptions() {
@@ -1180,6 +1376,18 @@ function boot() {
   $("settingsBtn").addEventListener("click", () => $("settingsModal").classList.remove("hidden"));
   $("settingsClose").addEventListener("click", () => $("settingsModal").classList.add("hidden"));
   $("settingsModal").addEventListener("click", (e) => { if (e.target === $("settingsModal")) $("settingsModal").classList.add("hidden"); });
+  $("mergeMappingCancel").addEventListener("click", () => $("mergeMappingModal").classList.add("hidden"));
+  $("mergeMappingApply").addEventListener("click", applyMergeMapping);
+  $("mergeMappingModal").addEventListener("click", (e) => { if (e.target === $("mergeMappingModal")) $("mergeMappingModal").classList.add("hidden"); });
+  $("mappingConfigFile").addEventListener("change", (e) => {
+    if (e.target.files && e.target.files.length) loadMappingConfigFile(e.target.files[0]);
+  });
+  $("mappingConfigDrop").addEventListener("dragover", (e) => { e.preventDefault(); $("mappingConfigDrop").classList.add("drag"); });
+  $("mappingConfigDrop").addEventListener("dragleave", () => $("mappingConfigDrop").classList.remove("drag"));
+  $("mappingConfigDrop").addEventListener("drop", (e) => {
+    e.preventDefault(); $("mappingConfigDrop").classList.remove("drag");
+    if (e.dataTransfer.files && e.dataTransfer.files.length) loadMappingConfigFile(e.dataTransfer.files[0]);
+  });
   $("cardBuild").addEventListener("click", openCrateDetails);
   $("cardShow").addEventListener("click", openShow);
   $("showBtn").addEventListener("click", openShow);

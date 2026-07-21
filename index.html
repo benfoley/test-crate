@@ -88,6 +88,25 @@
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
   .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px; max-width: 440px; box-shadow: 0 18px 50px rgba(0,0,0,0.5); }
   .modal h3 { margin: 0 0 10px; font-size: 17px; } .modal p { margin: 0 0 20px; color: var(--muted); } .modal .actions { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal.mapping-modal { max-width: 680px; width: 90vw; max-height: 82vh; display: flex; flex-direction: column; }
+  .mapping-load { margin-top: 14px; }
+  .mapping-load .dropzone { padding: 10px 12px; font-size: 12px; }
+  .mapping-load-error { color: var(--err); }
+  .mapping-body { overflow-y: auto; margin: 14px 0 18px; min-height: 0; }
+  .mapping-head, .mapping-row { display: grid; grid-template-columns: minmax(0,1fr) 24px minmax(0,1fr) 130px; gap: 10px; align-items: center; }
+  .mapping-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .mapping-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .mapping-row:last-child { border-bottom: none; }
+  .mapping-row .col-source { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+  .mapping-row .map-target, .mapping-row .map-type {
+    width: 100%; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); font-family: var(--mono); font-size: 12px;
+  }
+  .mapping-row .map-copy-btn {
+    width: 24px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .mapping-row .map-copy-btn:hover { color: var(--text); border-color: var(--accent); }
   .unsupported { margin: 28px; padding: 20px 24px; background: rgba(248, 81, 73, 0.08); border: 1px solid var(--err); border-radius: 10px; }
   .unsupported h2 { color: var(--err); }
   code { font-family: var(--mono); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
@@ -255,6 +274,25 @@
     <div id="settingsForm"></div>
     <div class="actions">
       <button id="settingsClose">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="mergeMappingModal" class="modal-overlay hidden">
+  <div class="modal mapping-modal">
+    <h3>Build column mapping</h3>
+    <p class="hint" style="margin:-8px 0 0;">Set a target property (and optional entity type) for each spreadsheet column. Columns left blank are skipped.</p>
+    <div class="mapping-load">
+      <label id="mappingConfigDrop" class="dropzone" for="mappingConfigFile">
+        <span id="mappingConfigDropText" class="dz-text">Drop a mapping config.json here, or click to load one</span>
+      </label>
+      <input type="file" id="mappingConfigFile" accept=".json,application/json" class="hidden" />
+      <div id="mappingConfigError" class="hint mapping-load-error hidden"></div>
+    </div>
+    <div id="mergeMappingBody" class="mapping-body"></div>
+    <div class="actions">
+      <button id="mergeMappingCancel" class="secondary" type="button">Cancel</button>
+      <button id="mergeMappingApply" type="button">Apply mapping</button>
     </div>
   </div>
 </div>

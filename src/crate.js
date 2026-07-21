@@ -326,6 +326,20 @@ function cellText(v) {
   return String(v);
 }
 
+// Read the header row (+ sheet name) of a single-sheet XLSX workbook — used to
+// drive the merge-mapping builder UI. Assumes one sheet, same as the UI does.
+export async function readXlsxHeaders(xlsxData) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(xlsxData);
+  const sheet = wb.worksheets[0];
+  if (!sheet) throw new Error("The spreadsheet has no worksheets");
+  let headers = [];
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) headers = row.values.slice(1).map(cellText);
+  });
+  return { sheetName: sheet.name, headers };
+}
+
 // Merge a spreadsheet's rows into matching crate entities (by an "@id" column),
 // applying the config's column→property mappings. Typed mappings split on comma
 // or slash and generate linked entities. Mutates `crate` in place; returns stats.
