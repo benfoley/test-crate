@@ -48,7 +48,7 @@ export const DEFAULT_SAMPLE_DATA = {
     { "@id": "#locality-tully-river", "@type": "Geometry", asWKT: "POINT(145.9167 -17.9333)" },
     { "@id": "#locality-brisbane", "@type": "Geometry", asWKT: "POINT(153.0251 -27.4698)" },
     { "@id": "#locality-palm-island", "@type": "Geometry", asWKT: "POINT(146.5833 -18.75)" },
-  ],
+  ]
 };
 
 // Custom rdf:Property definitions added to the graph (as in the original index.js).

@@ -59,24 +59,26 @@ function testCollectionMode() {
   const top = getByNameAndType(graph, "Top", "RepositoryCollection");
   assert.ok(top, "Top-level folder should be a RepositoryCollection in collection mode");
 
-  const filesObj = getByNameAndType(graph, "Files", "RepositoryObject");
+  const filesObj = getByNameAndType(graph, "Top_Files", "RepositoryObject");
   const subObj = getByNameAndType(graph, "sub", "RepositoryObject");
-  assert.ok(filesObj, "Collection mode should create a Files RepositoryObject for direct files");
+  assert.ok(filesObj, "Collection mode should create a named direct-files RepositoryObject for top-level files");
   assert.ok(subObj, "Collection mode should create a RepositoryObject for nested folder");
 
   assert.ok(
-    Array.isArray(top.hasPart) && top.hasPart.some((r) => r["@id"] === filesObj["@id"]) && top.hasPart.some((r) => r["@id"] === subObj["@id"]),
-    "Top-level collection should hasPart child objects"
+    Array.isArray(top["pcdm:hasMember"])
+      && top["pcdm:hasMember"].some((r) => r["@id"] === filesObj["@id"])
+      && top["pcdm:hasMember"].some((r) => r["@id"] === subObj["@id"]),
+    "Top-level collection should use pcdm:hasMember for child objects"
   );
   assert.deepEqual(
-    subObj.isPartOf,
+    subObj["pcdm:memberOf"],
     { "@id": top["@id"] },
-    "Nested folder object should be linked back to top-level collection via isPartOf"
+    "Nested folder object should be linked back to top-level collection via pcdm:memberOf"
   );
   assert.deepEqual(
-    filesObj.isPartOf,
+    filesObj["pcdm:memberOf"],
     { "@id": top["@id"] },
-    "Files object should be linked back to top-level collection via isPartOf"
+    "Files object should be linked back to top-level collection via pcdm:memberOf"
   );
 
   assert.deepEqual(

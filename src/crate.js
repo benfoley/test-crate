@@ -116,7 +116,7 @@ function addFolderEntities(crate, filesWithMeta, opts = {}) {
           name: childFolder,
           description: "",
           datePublished: "",
-          isPartOf: { "@id": id },
+          "pcdm:memberOf": { "@id": id },
           ...rootDatasetLicenseRefs(crate),
           hasPart: fileIds.map((fileId) => ({ "@id": fileId })),
         });
@@ -126,16 +126,17 @@ function addFolderEntities(crate, filesWithMeta, opts = {}) {
       });
 
       if (directFileIds.length) {
-        const filesObjectId = `#${topLevelSegment}/Files`;
+        const filesObjectName = `${group.name}_Files`;
+        const filesObjectId = `#${topLevelSegment}/${sanitizePathSegment(filesObjectName)}`;
         nestedObjectIds.push(filesObjectId);
         crate.addEntity({
           "@id": filesObjectId,
           "@type": "RepositoryObject",
           conformsTo: { "@id": "https://w3id.org/ldac/profile#Object" },
-          name: "Files",
+          name: filesObjectName,
           description: "",
           datePublished: "",
-          isPartOf: { "@id": id },
+          "pcdm:memberOf": { "@id": id },
           ...rootDatasetLicenseRefs(crate),
           hasPart: directFileIds.map((fileId) => ({ "@id": fileId })),
         });
@@ -152,7 +153,7 @@ function addFolderEntities(crate, filesWithMeta, opts = {}) {
         description: "",
         datePublished: "",
         ...rootDatasetLicenseRefs(crate),
-        ...(nestedObjectIds.length ? { hasPart: nestedObjectIds.map((nestedId) => ({ "@id": nestedId })) } : {}),
+        ...(nestedObjectIds.length ? { "pcdm:hasMember": nestedObjectIds.map((nestedId) => ({ "@id": nestedId })) } : {}),
       });
       memberIds.push(id);
       return;
@@ -234,6 +235,7 @@ function rewriteHashIdsForExport(crate) {
 
 /* ---------- top-level: build the ROCrate ---------- */
 export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log = () => {}, opts = {}) {
+  const includeSampleData = opts.includeSampleData !== false;
   const crate = new ROCrate({ array: true, link: true });
   crate.addContext({ ldac: "https://w3id.org/ldac/terms#" });
   crate.addContext({ pcdm: "http://pcdm.org/models#" });
@@ -250,7 +252,9 @@ export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log =
   }
 
   for (const p of CUSTOM_PROPERTIES) crate.addEntity(p);
-  addSampleData(crate, sampleData);
+  if (includeSampleData && sampleData) {
+    addSampleData(crate, sampleData);
+  }
   addFolderEntities(crate, filesWithMeta, opts);
   addFileEntities(crate, filesWithMeta, langByIndex);
   if (langByIndex) {

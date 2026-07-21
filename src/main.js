@@ -56,6 +56,8 @@ const OPTION_SCHEMA = [
 // Shown in the Settings modal (accessed from the button next to Menu).
 const SETTINGS_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
+  { key: "includeSampleData", label: "Include sample data entities", default: true,
+    hint: "Adds entities from sample-data.json (or built-in defaults) to the crate graph." },
   { key: "topLevelFolderType", type: "select", label: "Top-level folders are", default: "object",
     options: [
       { value: "object", label: "Objects (RepositoryObject)" },
@@ -460,6 +462,18 @@ function pickPreferredFile(files, ext, hints = []) {
   return byExt[0];
 }
 
+function preferredUploadedFile(uploadedFiles, ext, hints = []) {
+  if (!uploadedFiles) return null;
+  const uniqueFiles = [];
+  const seen = new Set();
+  uploadedFiles.forEach((file) => {
+    if (!file || seen.has(file)) return;
+    seen.add(file);
+    uniqueFiles.push(file);
+  });
+  return pickPreferredFile(uniqueFiles, ext, hints);
+}
+
 function getNestedValue(obj, path) {
   let cur = obj;
   for (const key of path.split(".")) {
@@ -590,8 +604,29 @@ async function resolveTemplateBundleFromConfig(cfg, opts = {}) {
     "files.style", "files.css", "paths.style", "paths.css", "assets.style", "assets.css",
   ]);
 
-  const templateResolved = templateRef ? await resolveTemplateAsset(templateRef, "template", opts) : { text: null, source: "none" };
-  const styleResolved = styleRef ? await resolveTemplateAsset(styleRef, "css", opts) : { text: "", source: "none" };
+  let templateResolved = templateRef ? await resolveTemplateAsset(templateRef, "template", opts) : { text: null, source: "none" };
+  let styleResolved = styleRef ? await resolveTemplateAsset(styleRef, "css", opts) : { text: "", source: "none" };
+
+  if (!templateRef && opts.uploadedFiles) {
+    const uploadedTemplate = preferredUploadedFile(opts.uploadedFiles, ".html", ["template", "preview"]);
+    if (uploadedTemplate) {
+      templateResolved = {
+        text: await uploadedTemplate.text(),
+        source: `upload (${uploadedTemplate.name})`,
+      };
+    }
+  }
+
+  if (!styleRef && opts.uploadedFiles) {
+    const uploadedStyle = preferredUploadedFile(opts.uploadedFiles, ".css", ["style", "preview"]);
+    if (uploadedStyle) {
+      styleResolved = {
+        text: await uploadedStyle.text(),
+        source: `upload (${uploadedStyle.name})`,
+      };
+    }
+  }
+
   return {
     template: templateResolved.text,
     css: styleResolved.text || "",
@@ -678,10 +713,14 @@ function describeRemoteSource(label, value, fallback) {
 /* ---------- Build ---------- */
 async function processFolder(dirHandle, files, options) {
   const config = (await readJsonFromFolder(dirHandle, "config.json")) || DEFAULT_CONFIG;
-  const sampleData = (await readJsonFromFolder(dirHandle, "sample-data.json")) || DEFAULT_SAMPLE_DATA;
+  const sampleData = options.includeSampleData
+    ? ((await readJsonFromFolder(dirHandle, "sample-data.json")) || DEFAULT_SAMPLE_DATA)
+    : null;
   log(
     `Config: ${config === DEFAULT_CONFIG ? "built-in default" : "config.json from folder"} · ` +
-    `Sample data: ${sampleData === DEFAULT_SAMPLE_DATA ? "built-in default" : "sample-data.json from folder"}.`,
+    (options.includeSampleData
+      ? `Sample data: ${sampleData === DEFAULT_SAMPLE_DATA ? "built-in default" : "sample-data.json from folder"}.`
+      : "Sample data: disabled by settings."),
     "muted"
   );
 
@@ -697,6 +736,7 @@ async function processFolder(dirHandle, files, options) {
 
   const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log, {
     topLevelFolderType: options.topLevelFolderType,
+    includeSampleData: !!options.includeSampleData,
   });
 
   // Optional: merge metadata from an uploaded spreadsheet (before outputs).
