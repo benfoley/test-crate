@@ -72,6 +72,7 @@ The crate object is then serialized with `crate.getJson()` (JSON), fed to `ro-cr
 | option | effect |
 |--------|--------|
 | Generate ro-crate-metadata.xlsx | write the spreadsheet output (on by default) |
+| Top-level folders are: Objects or Collections | Objects = existing behavior (`RepositoryObject`); Collections = `RepositoryCollection` with child folder objects and a `Files` object for direct files |
 | Generate ro-crate-preview.html | write the HTML preview (on by default) |
 | Template from rocss-template-repo | pick a folder from `benfoley/rocss-template-repo`; downloads and uses that folder's template config |
 | Template folder URL | use any public GitHub folder URL; downloads and uses that folder's template config |

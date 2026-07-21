@@ -56,6 +56,12 @@ const OPTION_SCHEMA = [
 // Shown in the Settings modal (accessed from the button next to Menu).
 const SETTINGS_SCHEMA = [
   { key: "makeXlsx", label: "Generate ro-crate-metadata.xlsx", default: true },
+  { key: "topLevelFolderType", type: "select", label: "Top-level folders are", default: "object",
+    options: [
+      { value: "object", label: "Objects (RepositoryObject)" },
+      { value: "collection", label: "Collections (RepositoryCollection)" },
+    ],
+    hint: "When Collections is selected, child folders are emitted as RepositoryObjects; files directly inside a top-level folder are grouped into an object named Files." },
   { key: "includeAlternateNames", label: "Match AUSTLANG alternate names", default: false,
     hint: "Only applies when “Identify subject languages” is on. More matches, more false positives." },
   { key: "overwrite", label: "Overwrite existing outputs", default: true },
@@ -275,6 +281,17 @@ function buildSelectField(opt) {
   ph.value = "";
   ph.textContent = opt.placeholder || "Select…";
   select.appendChild(ph);
+
+  if (Array.isArray(opt.options)) {
+    opt.options.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.value;
+      option.textContent = item.label || item.value;
+      select.appendChild(option);
+    });
+  }
+
+  if (typeof opt.default === "string") select.value = opt.default;
 
   wrap.appendChild(select);
   if (opt.hint) wrap.appendChild(hintEl(opt.hint));
@@ -678,7 +695,9 @@ async function processFolder(dirHandle, files, options) {
     langByIndex = await identifyAllLanguages(filesWithMeta, options.includeAlternateNames, log);
   }
 
-  const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log);
+  const crate = buildCrate(filesWithMeta, config, sampleData, langByIndex, log, {
+    topLevelFolderType: options.topLevelFolderType,
+  });
 
   // Optional: merge metadata from an uploaded spreadsheet (before outputs).
   if (options.merge && options.mergeUpload) {

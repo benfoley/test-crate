@@ -29,6 +29,7 @@ function pBasename(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.slice(i 
 function pStripExt(name) { const b = pBasename(name); const i = b.lastIndexOf("."); return i > 0 ? b.slice(0, i) : b; }
 function pDirname(p) { const i = p.lastIndexOf("/"); return i >= 0 ? p.slice(0, i) : ""; }
 function sanitizeUrl(rel) { return rel.replace(/ /g, "_"); }
+function sanitizePathSegment(rel) { return sanitizeUrl(rel).replace(/\//g, "_"); }
 function normalizeName(fileName) {
   return pStripExt(fileName).toLowerCase()
     .replace(/\b(copy|duplicate)\b/g, "")
@@ -45,6 +46,8 @@ export function buildFileMetadata(files) {
     return {
       ...file,
       id: file.relativePath,
+      folders,
+      topLevelName,
       isPartOfId: `#${sanitizeUrl(topLevelName)}`,
       isPartOfName: topLevelName,
     };
@@ -68,13 +71,93 @@ function addSampleData(crate, sampleData) {
     .forEach((entity) => crate.addEntity(entity));
 }
 
-function addFolderEntities(crate, filesWithMeta) {
+function rootDatasetLicenseRefs(crate) {
+  return crate.rootDataset.license?.length
+    ? { license: crate.rootDataset.license.map((license) => ({ "@id": license["@id"] })) }
+    : {};
+}
+
+function addFolderEntities(crate, filesWithMeta, opts = {}) {
+  const topLevelFolderType = opts.topLevelFolderType === "collection" ? "collection" : "object";
   const folderGroups = new Map();
   filesWithMeta.forEach((file) => {
     if (!folderGroups.has(file.isPartOfId)) folderGroups.set(file.isPartOfId, { name: file.isPartOfName, fileIds: [] });
     folderGroups.get(file.isPartOfId).fileIds.push(file.id);
   });
+
+  const memberIds = [];
   folderGroups.forEach((group, id) => {
+    const groupFiles = filesWithMeta.filter((file) => file.isPartOfId === id);
+    const hasTopLevelFolder = groupFiles.some((file) => file.folders.length > 0);
+
+    if (topLevelFolderType === "collection" && hasTopLevelFolder) {
+      const topLevelSegment = sanitizePathSegment(group.name);
+      const nestedObjectIds = [];
+      const nestedGroups = new Map();
+      const directFileIds = [];
+
+      groupFiles.forEach((file) => {
+        if (file.folders.length <= 1) {
+          directFileIds.push(file.id);
+          return;
+        }
+        const childFolder = file.folders[1];
+        if (!nestedGroups.has(childFolder)) nestedGroups.set(childFolder, []);
+        nestedGroups.get(childFolder).push(file.id);
+      });
+
+      nestedGroups.forEach((fileIds, childFolder) => {
+        const childId = `#${topLevelSegment}/${sanitizePathSegment(childFolder)}`;
+        nestedObjectIds.push(childId);
+        crate.addEntity({
+          "@id": childId,
+          "@type": "RepositoryObject",
+          conformsTo: { "@id": "https://w3id.org/ldac/profile#Object" },
+          name: childFolder,
+          description: "",
+          datePublished: "",
+          isPartOf: { "@id": id },
+          ...rootDatasetLicenseRefs(crate),
+          hasPart: fileIds.map((fileId) => ({ "@id": fileId })),
+        });
+        groupFiles
+          .filter((file) => file.folders[1] === childFolder)
+          .forEach((file) => { file.isPartOfId = childId; });
+      });
+
+      if (directFileIds.length) {
+        const filesObjectId = `#${topLevelSegment}/Files`;
+        nestedObjectIds.push(filesObjectId);
+        crate.addEntity({
+          "@id": filesObjectId,
+          "@type": "RepositoryObject",
+          conformsTo: { "@id": "https://w3id.org/ldac/profile#Object" },
+          name: "Files",
+          description: "",
+          datePublished: "",
+          isPartOf: { "@id": id },
+          ...rootDatasetLicenseRefs(crate),
+          hasPart: directFileIds.map((fileId) => ({ "@id": fileId })),
+        });
+        groupFiles
+          .filter((file) => file.folders.length <= 1)
+          .forEach((file) => { file.isPartOfId = filesObjectId; });
+      }
+
+      crate.addEntity({
+        "@id": id,
+        "@type": "RepositoryCollection",
+        conformsTo: { "@id": "https://w3id.org/ldac/profile#Collection" },
+        name: group.name,
+        description: "",
+        datePublished: "",
+        ...rootDatasetLicenseRefs(crate),
+        ...(nestedObjectIds.length ? { hasPart: nestedObjectIds.map((nestedId) => ({ "@id": nestedId })) } : {}),
+      });
+      memberIds.push(id);
+      return;
+    }
+
     crate.addEntity({
       "@id": id,
       "@type": "RepositoryObject",
@@ -82,13 +165,12 @@ function addFolderEntities(crate, filesWithMeta) {
       name: group.name,
       description: "",
       datePublished: "",
-      ...(crate.rootDataset.license?.length
-        ? { license: crate.rootDataset.license.map((license) => ({ "@id": license["@id"] })) }
-        : {}),
+      ...rootDatasetLicenseRefs(crate),
       hasPart: group.fileIds.map((fileId) => ({ "@id": fileId })),
     });
+    memberIds.push(id);
   });
-  crate.rootDataset["pcdm:hasMember"] = [...folderGroups.keys()].map((id) => ({ "@id": id }));
+  crate.rootDataset["pcdm:hasMember"] = memberIds.map((memberId) => ({ "@id": memberId }));
 }
 
 function addFileEntities(crate, filesWithMeta, langByIndex) {
@@ -134,7 +216,8 @@ function rewriteHashIdsForExport(crate) {
   crate.graph.forEach((entity) => {
     const types = Array.isArray(entity?.["@type"]) ? entity["@type"] : [entity?.["@type"]];
     const oldId = entity?.["@id"];
-    if (types.includes("RepositoryObject") && typeof oldId === "string" && oldId.startsWith("#")) {
+    if ((types.includes("RepositoryObject") || types.includes("RepositoryCollection"))
+      && typeof oldId === "string" && oldId.startsWith("#")) {
       idMap.set(oldId, `${arcpBase}${oldId.slice(1)}`);
     }
   });
@@ -150,7 +233,7 @@ function rewriteHashIdsForExport(crate) {
 }
 
 /* ---------- top-level: build the ROCrate ---------- */
-export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log = () => {}) {
+export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log = () => {}, opts = {}) {
   const crate = new ROCrate({ array: true, link: true });
   crate.addContext({ ldac: "https://w3id.org/ldac/terms#" });
   crate.addContext({ pcdm: "http://pcdm.org/models#" });
@@ -168,7 +251,7 @@ export function buildCrate(filesWithMeta, config, sampleData, langByIndex, log =
 
   for (const p of CUSTOM_PROPERTIES) crate.addEntity(p);
   addSampleData(crate, sampleData);
-  addFolderEntities(crate, filesWithMeta);
+  addFolderEntities(crate, filesWithMeta, opts);
   addFileEntities(crate, filesWithMeta, langByIndex);
   if (langByIndex) {
     const n = addLanguageEntities(crate, langByIndex);
