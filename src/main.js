@@ -503,7 +503,7 @@ async function loadTemplateRepoFolderOptions() {
   select.disabled = true;
   try {
     const apiUrl = `https://api.github.com/repos/${TEMPLATE_REPO_OWNER}/${TEMPLATE_REPO_NAME}/contents?ref=${encodeURIComponent(TEMPLATE_REPO_REF)}`;
-    const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" } });
+    const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const entries = await res.json();
     if (!Array.isArray(entries)) throw new Error("Unexpected API response");
@@ -694,6 +694,13 @@ async function readJsonFromFolder(handle, filename) {
   catch (e) { throw new Error(`${filename} in the folder is not valid JSON: ${e.message}`); }
 }
 
+// raw.githubusercontent.com is served through a CDN that caches per exact URL
+// for a few minutes, so a recent push can otherwise still serve stale content;
+// a unique query param forces a fresh fetch from origin.
+function bustCacheUrl(rawUrl) {
+  return `${rawUrl}${rawUrl.includes("?") ? "&" : "?"}_=${Date.now()}`;
+}
+
 function parseGitHubFolderUrl(rawUrl) {
   let url;
   try { url = new URL(rawUrl); }
@@ -818,14 +825,14 @@ async function resolveTemplateAsset(spec, kind, { dirHandle = null, baseRawUrl =
   if (kind === "css" && isLikelyInlineCss(val)) return { text: val, source: "inline config" };
 
   if (/^https?:\/\//i.test(val)) {
-    const res = await fetch(val);
+    const res = await fetch(bustCacheUrl(val), { cache: "no-store" });
     if (!res.ok) throw new Error(`Could not download ${kind} from URL (${res.status} ${res.statusText}).`);
     return { text: await res.text(), source: `url (${val})` };
   }
 
   if (baseRawUrl) {
     const url = new URL(val.replace(/^\.\//, ""), baseRawUrl).toString();
-    const res = await fetch(url);
+    const res = await fetch(bustCacheUrl(url), { cache: "no-store" });
     if (!res.ok) throw new Error(`Could not download ${kind} from config path "${val}" (${res.status} ${res.statusText}).`);
     return { text: await res.text(), source: `url (${url})` };
   }
@@ -898,7 +905,7 @@ async function resolveTemplateBundleFromConfig(cfg, opts = {}) {
 async function fetchTemplateBundleFromUrl(rawUrl) {
   const { owner, repo, ref, folderPath } = parseGitHubFolderUrl(rawUrl);
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(ref)}`;
-  const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" } });
+  const res = await fetch(apiUrl, { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Could not read template folder (${res.status} ${res.statusText}).`);
   }
@@ -914,7 +921,7 @@ async function fetchTemplateBundleFromUrl(rawUrl) {
 
   const readText = async (entry) => {
     if (!entry || !entry.download_url) return null;
-    const r = await fetch(entry.download_url);
+    const r = await fetch(bustCacheUrl(entry.download_url), { cache: "no-store" });
     if (!r.ok) throw new Error(`Could not download ${entry.name} (${r.status} ${r.statusText}).`);
     return r.text();
   };
